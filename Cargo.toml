@@ -3,4 +3,8 @@ name = "rbf"
 version = "0.1.0"
 authors = ["Luka Dornhecker"]
 
-[dependencies]
+[lib]
+name = "rbf_lib"
+
+[[bin]]
+name = "rbf"
