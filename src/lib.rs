@@ -9,10 +9,14 @@ pub struct Program(pub Vec<Instruction>);
 pub enum Instruction {
     /// Used to represent non-brainfuck characters.
     Noop,
-    /// Increment/Decrement the the current data cell.
-    IncD(i64),
-    /// Move the data pointer.
-    IncP(i64),
+    /// Increment the the current data cell.
+    Inc(u64),
+    /// Decrement the the current data cell.
+    Dec(u64),
+    /// Move the data pointer to the left.
+    Left(u64),
+    /// Move the data pointer to the right.
+    Right(u64),
     /// Read one byte from STDIN into the current data cell.
     Read,
     /// Write the ascii value of current data cell's content to STDOUT.
@@ -43,7 +47,7 @@ pub trait SourceRead {
 /// let mut source = SourceReader::new(&mut file);
 ///
 /// let ast = Program::parse(&mut source).unwrap();
-/// let expected = Program(vec![IncD(2), Read, Write, IncP(-1), Loop(vec![Read, Loop(vec![IncD(1)])])]);
+/// let expected = Program(vec![Inc(2), Read, Write, Left(1), Loop(vec![Read, Loop(vec![Inc(1)])])]);
 ///
 /// assert_eq!(expected, ast);
 /// ```
@@ -127,7 +131,7 @@ impl Program {
     ///
     /// let mut source = "+++.".to_owned();
     ///
-    /// assert_eq!(Program(vec![IncD(3), Write]), Program::parse(&mut source).unwrap());
+    /// assert_eq!(Program(vec![Inc(3), Write]), Program::parse(&mut source).unwrap());
     /// ```
     pub fn parse<T: SourceRead>(source: &mut T) -> Result<Self, String> {
         let prog = Self::parse_program(source, 0)?;
@@ -200,8 +204,9 @@ impl Program {
             source.consume();
         }
         match acc {
-            0 => Noop,
-            _ => IncD(acc),
+            _ if acc > 0 => Inc(acc as u64),
+            _ if acc < 0 => Dec(acc.abs() as u64),
+            _ => Noop,
         }
     }
 
@@ -216,8 +221,9 @@ impl Program {
             source.consume();
         }
         match acc {
-            0 => Noop,
-            _ => IncP(acc),
+            _ if acc > 0 => Right(acc as u64),
+            _ if acc < 0 => Left(acc.abs() as u64),
+            _ => Noop,
         }
     }
 }
