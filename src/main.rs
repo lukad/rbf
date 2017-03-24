@@ -6,7 +6,12 @@ extern crate rbf_lib;
 use rbf_lib::{SourceReader, Program};
 
 fn main() {
-    let mut file = match File::open("foo.bf") {
+    let filename = match std::env::args().nth(1) {
+        Some(s) => s,
+        None => process::exit(1),
+    };
+
+    let mut file = match File::open(filename) {
         Ok(f) => f,
         Err(s) => {
             println!("Could not read foo.bf: {}", s);
