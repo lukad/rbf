@@ -31,6 +31,22 @@ pub trait SourceRead {
     fn consume(&mut self);
 }
 
+/// Generic implementation for the `SourceRead` trait for all types implementing `std::io::Read`.
+///
+/// # Examples
+///
+/// ```
+/// use rbf_lib::Instruction::*;
+/// use rbf_lib::{Program, SourceReader};
+///
+/// let mut file = std::fs::File::open("test/example.bf").unwrap();
+/// let mut source = SourceReader::new(&mut file);
+///
+/// let ast = Program::parse(&mut source).unwrap();
+/// let expected = Program(vec![IncD(2), Read, Write, IncP(-1), Loop(vec![Read, Loop(vec![IncD(1)])])]);
+///
+/// assert_eq!(expected, ast);
+/// ```
 pub struct SourceReader<'a, T: Read + 'a> {
     reader: &'a mut T,
     current: Option<char>,
@@ -39,7 +55,7 @@ pub struct SourceReader<'a, T: Read + 'a> {
 impl<'a, T> SourceReader<'a, T>
     where T: Read + 'a
 {
-    /// Constructs a new `SourceReader`.
+    /// Constructs a new `SourceReader` and consumes the first token.
     pub fn new(r: &'a mut T) -> SourceReader<'a, T> {
         let mut source = SourceReader {
             reader: r,
