@@ -4,7 +4,11 @@ version = "0.1.0"
 authors = ["Luka Dornhecker"]
 
 [lib]
-name = "rbf_lib"
+name = "rbf"
+
+[dependencies]
+combine = "*"
 
 [[bin]]
+doc = false
 name = "rbf"

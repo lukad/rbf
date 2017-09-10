@@ -1,24 +1,22 @@
+extern crate rbf;
+
+use std::env;
 use std::fs::File;
-use std::process;
+use std::io::{self, Read};
 
-extern crate rbf_lib;
+use rbf::parse;
 
-use rbf_lib::{SourceReader, Program};
+fn read_source<R>(mut input: R) -> String where R: Read {
+    let mut source = String::new();
+    input.read_to_string(&mut source).unwrap();
+    source
+}
 
 fn main() {
-    let filename = match std::env::args().nth(1) {
-        Some(s) => s,
-        None => process::exit(1),
+    let source = match env::args().nth(1) {
+        Some(file) => read_source(File::open(file).unwrap()),
+        None => read_source(io::stdin())
     };
 
-    let mut file = match File::open(filename) {
-        Ok(f) => f,
-        Err(s) => {
-            println!("Could not read foo.bf: {}", s);
-            process::exit(1);
-        }
-    };
-    let mut reader = SourceReader::new(&mut file);
-
-    println!("{:?}", Program::parse(&mut reader).unwrap().0);
+    println!("{:?}", parse(source.as_str()))
 }
