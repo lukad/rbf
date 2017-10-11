@@ -8,9 +8,9 @@ pub enum Instruction {
     Add(i64),
     /// Move the data pointer.
     Move(i64),
-    /// Go to the next `0` data cell, moving in specified increments.
-    Set(i64),
     /// Set the current data cell to this value.
+    Set(i64),
+    /// Go to the next `0` data cell, moving in specified increments.
     Scan(i64),
     /// Read one byte from STDIN into the current data cell.
     Read,
