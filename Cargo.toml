@@ -7,7 +7,7 @@ authors = ["Luka Dornhecker"]
 name = "rbf"
 
 [dependencies]
-combine = "*"
+combine = "3.4"
 
 [[bin]]
 doc = false
