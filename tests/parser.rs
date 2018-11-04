@@ -20,7 +20,10 @@ fn it_parses_a_very_very_simple_program() {
 
 #[test]
 fn it_parses_a_very_simple_program() {
-    assert_eq!(parse(">+<-,."), [Move(1), Add(1), Move(-1), Add(-1), Read, Write]);
+    assert_eq!(
+        parse(">+<-,."),
+        [Move(1), Add(1), Move(-1), Add(-1), Read, Write]
+    );
 }
 
 #[test]
@@ -62,12 +65,8 @@ fn it_omits_empty_nested_loops() {
 fn it_parses_nested_loops() {
     let expected = vec![
         Add(-1),
-        Loop(vec![
-            Add(2),
-            Loop(vec![Add(-2)]),
-            Loop(vec![Add(2)]),
-        ]),
-        Add(1)
+        Loop(vec![Add(2), Loop(vec![Add(-2)]), Loop(vec![Add(2)])]),
+        Add(1),
     ];
     assert_eq!(parse("-[++[--][++]]+"), expected);
 }
