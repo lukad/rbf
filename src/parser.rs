@@ -39,66 +39,58 @@ parser!{
 }
 
 fn optimize(program: Program) -> Program {
-    match *program {
-        [] => vec![],
-        [Add(0), ref rest..] => optimize(rest.to_vec()),
-        [Move(0), ref rest..] => optimize(rest.to_vec()),
+    let mut iter = program.iter().peekable();
+    let mut prog: Program = vec![];
 
-        [Add(a), Add(b), ref rest..] => {
-            let mut v = optimize(rest.to_vec());
-            v.insert(0, Add(a + b));
-            v
-        }
-        [Move(a), Move(b), ref rest..] => {
-            let mut v = optimize(rest.to_vec());
-            v.insert(0, Move(a + b));
-            v
-        }
+    while let Some(current) = iter.next() {
+        match (current, iter.peek()) {
+            (Add(0), _) => (),
+            (Move(0), _) => (),
 
-        [Loop(ref body), ref rest..] => {
-            let mut v: Program = vec![];
-            if let Some(mut body) = optimize_loop(body.clone()) {
-                v.append(&mut body);
+            (Add(a), Some(Add(b))) => {
+                iter.next();
+                prog.push(Add(a + b))
             }
-            v.append(&mut optimize(rest.to_vec()));
-            v
-        }
+            (Move(a), Some(Move(b))) => {
+                iter.next();
+                prog.push(Move(a + b))
+            }
 
-        [Set(a), Add(b), ref rest..] => {
-            let mut v = optimize(rest.to_vec());
-            v.insert(0, Set(a + b));
-            v
-        }
-        [Add(_), Set(b), ref rest..] => {
-            let mut v = optimize(rest.to_vec());
-            v.insert(0, Set(b));
-            v
-        }
-        [Set(_), Set(x), ref rest..] => {
-            let mut v = optimize(rest.to_vec());
-            v.insert(0, Set(x));
-            v
-        }
-        [Set(0), Loop(_), ref rest..] => {
-            let mut v = optimize(rest.to_vec());
-            v.insert(0, Set(0));
-            v
-        }
+            (Loop(ref body), _) => {
+                if let Some(optimized_body) = optimize_loop(body.clone()) {
+                    prog.push(optimized_body);
+                }
+            }
 
-        [ref ins, ref rest..] => {
-            let mut v = optimize(rest.to_vec());
-            v.insert(0, ins.clone());
-            v
+            (Set(a), Some(Add(b))) => {
+                iter.next();
+                prog.push(Set(a + b))
+            }
+            (Add(_), Some(Set(a))) => {
+                iter.next();
+                prog.push(Set(*a))
+            }
+            (Set(_), Some(Set(a))) => {
+                iter.next();
+                prog.push(Set(*a))
+            }
+            (Set(0), Some(Loop(_))) => {
+                iter.next();
+                prog.push(Set(0))
+            }
+
+            _ => prog.push(current.clone()),
         }
     }
+    prog
 }
 
-fn optimize_loop(program: Program) -> Option<Program> {
+fn optimize_loop(program: Program) -> Option<Instruction> {
     match *program {
         [] => None,
-        [Add(-1)] => Some(vec![Set(0)]),
-        [Move(n)] => Some(vec![Scan(n)]),
-        _ => Some(vec![Loop(optimize(program))]),
+        [Add(-1)] => Some(Set(0)),
+        [Move(n)] => Some(Scan(n)),
+        _ => Some(Loop(optimize(program))),
     }
 }
 
@@ -114,7 +106,7 @@ fn opt(program: Program) -> Program {
     opt_b
 }
 
-/// Transform source input into a [Program](type.Program.html).
+/// Transform brainfuck source into a [Program](type.Program.html).
 pub fn parse(input: &str) -> Program {
     let (prog, _state) = program().parse(input).unwrap();
     opt(prog)

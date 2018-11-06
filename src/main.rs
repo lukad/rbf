@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{self, Read};
 
 use rbf::parse;
+use rbf::Machine;
 
 fn read_source<R>(mut input: R) -> String
 where
@@ -21,5 +22,7 @@ fn main() {
         None => read_source(io::stdin()),
     };
 
-    println!("{:?}", parse(source.as_str()))
+    let program = parse(source.as_str());
+    let mut machine = Machine::new(&program);
+    machine.run();
 }
