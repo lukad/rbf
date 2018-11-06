@@ -102,7 +102,7 @@ fn it_omits_sets_succeded_by_sets() {
 }
 
 #[test]
-fn it_omits_loops_preceed_by_sets() {
+fn it_omits_loops_preceed_by_set_0() {
     assert_eq!(parse("[-][>+<-]."), [Set(0), Write]);
 }
 
