@@ -4,8 +4,7 @@ use std::env;
 use std::fs::File;
 use std::io::{self, Read};
 
-use rbf::parse;
-use rbf::Machine;
+use rbf::{parse, Jit};
 
 fn read_source<R>(mut input: R) -> String
 where
@@ -23,6 +22,7 @@ fn main() {
     };
 
     let program = parse(source.as_str());
-    let mut machine = Machine::new(&program);
-    machine.run();
+    let mut jit = Jit::allocate();
+    jit.generate(&program);
+    jit.run();
 }

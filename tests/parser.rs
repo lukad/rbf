@@ -82,27 +82,32 @@ fn it_omits_zero_moves() {
 }
 
 #[test]
-fn it_transforms_a_scan_loop_to_a_scan() {
+fn it_transforms_a_scan_loop_into_a_scan() {
     assert_eq!(parse("[-]"), [Set(0)]);
 }
 
 #[test]
-fn it_combines_set_with_succeeding_adds() {
+fn it_combines_set_with_following_adds() {
     assert_eq!(parse("[-]+++]"), [Set(3)]);
 }
 
 #[test]
-fn it_omits_adds_succeed_by_sets() {
+fn it_omits_adds_after_sets() {
     assert_eq!(parse("+++[-]+"), [Set(1)]);
 }
 
 #[test]
-fn it_omits_sets_succeded_by_sets() {
+fn it_omits_sets_before_sets() {
     assert_eq!(parse("[-]+++++[-]--"), [Set(-2)]);
 }
 
 #[test]
-fn it_omits_loops_preceed_by_set_0() {
+fn it_omits_loops_after_set_0() {
+    assert_eq!(parse("[-][>+.<-]."), [Set(0), Write]);
+}
+
+#[test]
+fn it_omits_muls_after_set_0() {
     assert_eq!(parse("[-][>+<-]."), [Set(0), Write]);
 }
 

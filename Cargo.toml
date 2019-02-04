@@ -1,14 +1,17 @@
 [package]
+authors = ["Luka Dornhecker"]
 name = "rbf"
 version = "0.1.0"
-authors = ["Luka Dornhecker"]
 
-[lib]
+[[bin]]
+doc = false
 name = "rbf"
 
 [dependencies]
 combine = "3.4"
+dynasm = "0.3"
+dynasmrt = "0.3"
+libc = "0.2.48"
 
-[[bin]]
-doc = false
+[lib]
 name = "rbf"

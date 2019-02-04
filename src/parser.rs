@@ -1,10 +1,12 @@
+use std::collections::HashMap;
+
 use ast::Instruction::*;
 use ast::*;
 
 use combine::char::char;
 use combine::{between, choice, many, many1, satisfy, skip_many, Parser, Stream};
 
-parser!{
+parser! {
     #[inline(always)]
     fn program[I]()(I) -> Program
         where [I: Stream<Item=char>]
@@ -58,7 +60,7 @@ fn optimize(program: Program) -> Program {
 
             (Loop(ref body), _) => {
                 if let Some(optimized_body) = optimize_loop(body.clone()) {
-                    prog.push(optimized_body);
+                    prog.extend(optimized_body);
                 }
             }
 
@@ -78,6 +80,10 @@ fn optimize(program: Program) -> Program {
                 iter.next();
                 prog.push(Set(0))
             }
+            (Set(0), Some(Mul(_, _))) => {
+                prog.push(Set(0));
+                while let Some(Mul(_, _)) = iter.next() {}
+            }
 
             _ => prog.push(current.clone()),
         }
@@ -85,13 +91,39 @@ fn optimize(program: Program) -> Program {
     prog
 }
 
-fn optimize_loop(program: Program) -> Option<Instruction> {
+fn optimize_loop(program: Program) -> Option<Vec<Instruction>> {
     match *program {
         [] => None,
-        [Add(-1)] => Some(Set(0)),
-        [Move(n)] => Some(Scan(n)),
-        _ => Some(Loop(optimize(program))),
+        [Add(-1)] => Some(vec![Set(0)]),
+        [Move(n)] => Some(vec![Scan(n)]),
+        _ => Some(optimize_mul(optimize(program))),
     }
+}
+
+fn optimize_mul(program: Program) -> Vec<Instruction> {
+    let mut muls = HashMap::new();
+    let mut offset = 0;
+    let mut is_mul = true;
+
+    for ins in program.iter() {
+        match ins {
+            Add(i) => *muls.entry(offset).or_insert(0) += i,
+            Move(i) => offset += i,
+            _ => is_mul = false,
+        }
+    }
+
+    if !is_mul || offset != 0 || muls.get(&0) != Some(&-1) {
+        return vec![Loop(program)];
+    }
+
+    let mut result: Vec<_> = muls
+        .iter()
+        .map(|(&k, &v)| if k == 0 { None } else { Some(Mul(k, v)) })
+        .filter_map(|x| x)
+        .collect();
+    result.push(Set(0));
+    result
 }
 
 fn opt(program: Program) -> Program {

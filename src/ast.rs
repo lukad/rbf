@@ -1,21 +1,24 @@
-/// A Vector of [instructions](enum.Instruction.html) representing a Brainfuck program.
+/// A Vector of [`Instruction`](enum.Instruction.html) representing a Brainfuck program.
 pub type Program = Vec<Instruction>;
 
-/// Brainfuck instructions.
+/// An enum representing all brainfuck instructions.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Instruction {
-    /// Add to the current data cell.
+    /// Adds to the current data cell.
     Add(i64),
-    /// Move the data pointer.
+    /// Moves the data pointer.
     Move(i64),
-    /// Set the current data cell to this value.
+    /// Sets the current data cell to the given value.
     Set(i64),
-    /// Go to the next `0` data cell, moving in specified increments.
+    /// Multiplies the current cell with the second parameter and adds it to the cell at the
+    /// offset given by the first parameter.
+    Mul(i64, i64),
+    /// Goes to the next `0` data cell, moving in specified increments.
     Scan(i64),
-    /// Read one byte from STDIN into the current data cell.
+    /// Reads one byte from STDIN into the current data cell.
     Read,
-    /// Write the ascii value of the current data cell's content to STDOUT.
+    /// Writes the current data cell's content to STDOUT as ASCII.
     Write,
-    /// Repeat the `Loop` body until the current data cell is `0`.
-    Loop(Vec<Instruction>),
+    /// Repeats the `Loop` body until the current data cell is `0`.
+    Loop(Program),
 }
