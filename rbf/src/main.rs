@@ -1,10 +1,10 @@
-extern crate rbf;
+extern crate librbf;
 
 use std::env;
 use std::fs::File;
 use std::io::{self, Read};
 
-use rbf::{parse, Jit};
+use librbf::{parse, Jit};
 
 fn read_source<R>(mut input: R) -> String
 where

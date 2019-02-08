@@ -1,17 +1,6 @@
-[package]
-authors = ["Luka Dornhecker"]
-name = "rbf"
-version = "0.1.0"
+[workspace]
 
-[[bin]]
-doc = false
-name = "rbf"
-
-[dependencies]
-combine = "3.4"
-dynasm = "0.3"
-dynasmrt = "0.3"
-libc = "0.2.48"
-
-[lib]
-name = "rbf"
+members = [
+    "rbf",
+    "librbf"
+]

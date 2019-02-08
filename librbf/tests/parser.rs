@@ -1,7 +1,6 @@
-extern crate rbf;
+extern crate librbf;
 
-use rbf::parse;
-use rbf::Instruction::*;
+use librbf::{parse, Instruction::*};
 
 #[test]
 fn it_parses_an_empty_program() {
