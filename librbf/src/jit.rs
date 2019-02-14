@@ -2,6 +2,7 @@ use ast::{Instruction::*, Program};
 use dynasm::dynasm;
 use dynasmrt::{DynasmApi, DynasmLabelApi};
 use std::io::Read;
+use std::io::{self, Write};
 use std::mem;
 
 const PAGE_SIZE: usize = 4096;
@@ -11,6 +12,7 @@ extern "sysv64" fn putchar(c: u8) {
 }
 
 extern "sysv64" fn getchar() -> u8 {
+    io::stdout().flush().unwrap();
     match std::io::stdin().bytes().next() {
         Some(Ok(c)) => c as _,
         _ => 0,
