@@ -2,18 +2,10 @@ extern crate clap;
 extern crate librbf;
 
 use std::fs::File;
-use std::io::{self, Read};
 
 use librbf::{parse, Jit};
 
 use clap::{App, AppSettings, Arg};
-
-fn read_source(path: &str) -> io::Result<String> {
-    let mut file = File::open(path)?;
-    let mut source = String::new();
-    file.read_to_string(&mut source)?;
-    Ok(source)
-}
 
 fn main() {
     let matches = App::new(env!("CARGO_PKG_NAME"))
@@ -37,14 +29,9 @@ fn main() {
         .get_matches();
 
     let source_path = matches.value_of("PROGRAM").unwrap();
-    let source = match read_source(source_path) {
-        Ok(source) => source,
-        Err(a) => {
-            eprintln!("Could not read program: {}", a);
-            std::process::exit(1);
-        }
-    };
-    let program = parse(source.as_str());
+    let file = File::open(source_path).expect("Could not read program");
+
+    let program = parse(file);
 
     if let Some("ast") = matches.value_of("emit") {
         println!("{:?}", program);

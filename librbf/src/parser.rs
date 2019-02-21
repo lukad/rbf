@@ -1,27 +1,32 @@
 use std::collections::HashMap;
+use std::io::Read;
 
 use ast::Instruction::*;
 use ast::*;
 
-use combine::char::char;
-use combine::{between, choice, many, many1, satisfy, skip_many, Parser, Stream};
+use combine::byte::byte;
+use combine::{
+    between, choice, many, many1, satisfy, skip_many,
+    stream::{buffered::BufferedStream, state::State, ReadStream},
+    Parser, Stream,
+};
 
 parser! {
     #[inline(always)]
     fn program[I]()(I) -> Program
-        where [I: Stream<Item=char>]
+        where [I: Stream<Item=u8>]
     {
-        let comments = || skip_many(satisfy(|c| !"+-><,.[]".chars().any(|t| t == c)));
-        let chars = |c| many1(char(c));
+        let comments = || skip_many(satisfy(|c| !"+-><,.[]".bytes().any(|t| t == c)));
+        let chars = |c| many1::<Vec<_>, _>(byte(c));
 
-        let add = chars('+').map(|s: String| Add(s.len() as i64));
-        let sub = chars('-').map(|s: String| Add(-(s.len() as i64)));
-        let left = chars('<').map(|s: String| Move(-(s.len() as i64)));
-        let right = chars('>').map(|s: String| Move(s.len() as i64));
-        let read = char(',').map(|_: char| Read);
-        let write = char('.').map(|_: char| Write);
+        let add = chars(b'+').map(|s: _| Add(s.len() as i64));
+        let sub = chars(b'-').map(|s: _| Add(-(s.len() as i64)));
+        let left = chars(b'<').map(|s: _| Move(-(s.len() as i64)));
+        let right = chars(b'>').map(|s: _| Move(s.len() as i64));
+        let read = byte(b',').map(|_| Read);
+        let write = byte(b'.').map(|_| Write);
 
-        let bfloop = between(char('['), char(']'), program()).map(Loop);
+        let bfloop = between(byte(b'['), byte(b']'), program()).map(Loop);
 
         let instruction = choice((
             add,
@@ -138,8 +143,9 @@ fn opt(program: Program) -> Program {
     opt_b
 }
 
-/// Transform brainfuck source into a [Program](type.Program.html).
-pub fn parse(input: &str) -> Program {
-    let (prog, _state) = program().parse(input).unwrap();
+/// Parses Brainfuck source and returns a [Program](type.Program.html).
+pub fn parse<R: Read>(input: R) -> Program {
+    let stream = BufferedStream::new(State::new(ReadStream::new(input)), 1);
+    let (prog, _state) = program().parse(stream).unwrap();
     opt(prog)
 }

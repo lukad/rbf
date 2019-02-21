@@ -1,6 +1,10 @@
 extern crate librbf;
 
-use librbf::{parse, Instruction::*};
+use librbf::{Instruction::*, Program};
+
+fn parse(input: &str) -> Program {
+    librbf::parse(input.as_bytes())
+}
 
 #[test]
 fn it_parses_an_empty_program() {
