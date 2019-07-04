@@ -101,6 +101,7 @@ fn optimize_loop(program: Program) -> Option<Vec<Instruction>> {
         [] => None,
         [Add(-1)] => Some(vec![Set(0)]),
         [Move(n)] => Some(vec![Scan(n)]),
+        [Set(0)] => Some(vec![Set(0)]),
         _ => Some(optimize_mul(optimize(program))),
     }
 }
