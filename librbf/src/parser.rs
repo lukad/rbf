@@ -6,7 +6,7 @@ use ast::*;
 
 use combine::byte::byte;
 use combine::{
-    between, choice, many, many1, satisfy, skip_many,
+    between, choice, eof, many, many1, satisfy, skip_many,
     stream::{buffered::BufferedStream, state::State, ReadStream},
     Parser, Stream,
 };
@@ -147,6 +147,6 @@ fn opt(program: Program) -> Program {
 /// Parses Brainfuck source and returns a [Program](type.Program.html).
 pub fn parse<R: Read>(input: R) -> Program {
     let stream = BufferedStream::new(State::new(ReadStream::new(input)), 1);
-    let (prog, _state) = program().parse(stream).unwrap();
+    let ((prog, _eof), _state) = (program(), eof()).parse(stream).unwrap();
     opt(prog)
 }

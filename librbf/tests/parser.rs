@@ -91,7 +91,7 @@ fn it_transforms_a_scan_loop_into_a_scan() {
 
 #[test]
 fn it_combines_set_with_following_adds() {
-    assert_eq!(parse("[-]+++]"), [Set(3)]);
+    assert_eq!(parse("[-]+++"), [Set(3)]);
 }
 
 #[test]
