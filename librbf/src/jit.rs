@@ -1,17 +1,15 @@
 use ast::{Instruction::*, Program};
 use dynasm::dynasm;
-use dynasmrt::{DynasmApi, DynasmLabelApi};
+use dynasmrt::{DynasmApi, DynasmLabelApi, ExecutableBuffer};
 use std::io::Read;
 use std::io::{self, Write};
 use std::mem;
 
-const PAGE_SIZE: usize = 4096;
-
-extern "sysv64" fn putchar(c: u8) {
+extern "C" fn putchar(c: u8) {
     print!("{}", c as char);
 }
 
-extern "sysv64" fn getchar() -> u8 {
+extern "C" fn getchar() -> u8 {
     io::stdout().flush().unwrap();
     match std::io::stdin().bytes().next() {
         Some(Ok(c)) => c as _,
@@ -19,72 +17,84 @@ extern "sysv64" fn getchar() -> u8 {
     }
 }
 
-extern "C" {
-    fn memset(s: *mut libc::c_void, c: libc::uint32_t, n: libc::size_t) -> *mut libc::c_void;
+extern "C" fn memzero(dst: *mut u8, count: usize) {
+    unsafe { std::ptr::write_bytes(dst, 0, count) }
 }
 
-/// Generates code and manages memory.
+#[derive(Debug)]
+pub struct Function {
+    _buf: ExecutableBuffer,
+    fun: fn() -> (),
+}
+
+impl Function {
+    fn new(jit: Jit) -> Self {
+        let buf = jit.ops.finalize().unwrap();
+        let fun: fn() -> () = unsafe { mem::transmute(buf.ptr(jit.start)) };
+
+        Self {
+            _buf: buf,
+            fun: fun,
+        }
+    }
+
+    pub fn run(&self) {
+        (self.fun)();
+    }
+}
+
+/// Compiles code and creates a `Function`
 pub struct Jit {
-    memory: *mut u8,
+    tape_size: usize,
     ops: dynasmrt::x64::Assembler,
     start: dynasmrt::AssemblyOffset,
 }
 
-fn allocate(size: usize, prot: libc::c_int) -> *mut u8 {
-    unsafe {
-        let mut buffer: *mut libc::c_void = mem::uninitialized();
-        libc::posix_memalign(&mut buffer, PAGE_SIZE, size);
-
-        libc::mprotect(buffer, size, prot);
-
-        memset(buffer, 0, size);
-
-        mem::transmute(buffer)
-    }
-}
-
 impl Jit {
-    /// Initializes a `Jit` and allocates memory for the generated code
-    /// plus 30000 bytes for the tape.
-    pub fn allocate() -> Jit {
-        let memory_size = ((30_000 + PAGE_SIZE) / PAGE_SIZE) * PAGE_SIZE;
-
-        let memory = allocate(memory_size, libc::PROT_READ | libc::PROT_WRITE);
-
+    /// Initializes a `Jit` with a tape size of `30_000`
+    pub fn new() -> Jit {
         let ops = dynasmrt::x64::Assembler::new().unwrap();
 
         Jit {
-            memory: memory,
+            tape_size: 30_000,
             start: ops.offset(),
             ops: ops,
         }
     }
 
-    /// Finalizes the generated code and executes it.
-    pub fn run(self) {
-        let buf = self.ops.finalize().unwrap();
-        let fun: extern "sysv64" fn() = unsafe { mem::transmute(buf.ptr(self.start)) };
-        fun();
+    /// Sets the tape size. Will be aligned to 16 bytes
+    pub fn set_tape_size(&mut self, tape_size: usize) -> &Self {
+        self.tape_size = tape_size + (tape_size % 16);
+        self
     }
 
-    /// Generates machine code for the given program.
-    pub fn generate(&mut self, program: &Program) {
-        let mem_address: u64 = unsafe { mem::transmute(self.memory) };
-
-        self.start = self.ops.offset();
+    /// Generates machine code for the given program
+    pub fn compile(mut self, program: &Program) -> Function {
+        // Prologue
         dynasm!(self.ops
-                ; push rbp
-                ; mov rbp, rsp
-                ; mov rbx, QWORD mem_address as _
+                ; push rbp // Store frame pointer
+                ; mov rbp, rsp // Address of current stack frame
+                ; sub rsp, self.tape_size as _ // Reserve memory for tape on the stack
+                ; lea rbx, [rsp] // Save memory address in rbx
+        );
+
+        // Zero tape
+        dynasm!(self.ops
+                ; mov rax, QWORD memzero as _
+                ; mov rdi, rbx
+                ; mov rsi, self.tape_size as _
+                ; call rax
         );
 
         self.gen(program);
 
+        // Epilogue
         dynasm!(self.ops
-                ; mov rsp, rbp
-                ; pop rbp
+                ; leave // Restore frame pointer
                 ; ret
         );
+
+        Function::new(self)
     }
 
     fn gen(&mut self, program: &Program) {
@@ -119,11 +129,11 @@ impl Jit {
                             ; mov BYTE [rbx], (i % 0xFF) as _
                     );
                 }
-                Mul(offset, mul) => {
+                &Mul(offset, mul) => {
                     dynasm!(self.ops
-                            ; mov al, *mul as _
+                            ; mov al, mul as _
                             ; mul BYTE [rbx]
-                            ; add [rbx + *offset as _], al
+                            ; add [rbx + offset as _], al
                     );
                 }
                 &Scan(i) => {

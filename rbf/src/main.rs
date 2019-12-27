@@ -2,6 +2,7 @@ extern crate clap;
 extern crate librbf;
 
 use std::fs::File;
+use std::io::Write;
 
 use librbf::{parse, Jit};
 
@@ -38,7 +39,10 @@ fn main() {
         return;
     }
 
-    let mut jit = Jit::allocate();
-    jit.generate(&program);
-    jit.run();
+    {
+        let jit = Jit::new();
+        let fun = jit.compile(&program);
+        fun.run();
+        std::io::stdout().flush().unwrap();
+    }
 }
