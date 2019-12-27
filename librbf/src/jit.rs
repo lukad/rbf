@@ -63,8 +63,8 @@ impl Jit {
     }
 
     /// Sets the tape size. Will be aligned to 16 bytes
-    pub fn set_tape_size(&mut self, tape_size: usize) -> &Self {
-        self.tape_size = tape_size + (tape_size % 16);
+    pub fn set_tape_size(mut self, tape_size: usize) -> Self {
+        self.tape_size = ((tape_size + 16 - 1) / 16) * 16;
         self
     }
 

@@ -20,6 +20,13 @@ fn main() {
                 .required(true),
         )
         .arg(
+            Arg::with_name("tape size")
+                .short("t")
+                .long("tape-size")
+                .help("The tape size")
+                .default_value("30000"),
+        )
+        .arg(
             Arg::with_name("emit")
                 .short("e")
                 .value_name("EMIT")
@@ -39,8 +46,14 @@ fn main() {
         return;
     }
 
+    let tape_size: usize = matches
+        .value_of("tape size")
+        .unwrap()
+        .parse()
+        .expect("Invalid tape size");
+
     {
-        let jit = Jit::new();
+        let jit = Jit::new().set_tape_size(tape_size);
         let fun = jit.compile(&program);
         fun.run();
         std::io::stdout().flush().unwrap();
