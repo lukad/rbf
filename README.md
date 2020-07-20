@@ -16,13 +16,12 @@ The way this interpreter works is:
 
 ## Installation
 
-This project requires rust nightly because dynasm-rs
-[does not yet support stable](https://github.com/CensoredUsername/dynasm-rs/issues/31).
+This project requires rust 1.45.0 or newer.
 
 ### Using `cargo install`
 
 ``` bash
-$ cargo +nightly install https://github.com/lukad/rbf.git
+$ cargo install https://github.com/lukad/rbf.git
 ```
 
 ### Compiling manually with cargo

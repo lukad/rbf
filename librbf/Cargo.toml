@@ -5,6 +5,6 @@ authors = ["Luka Dornhecker <luka.dornhecker@gmail.com>"]
 
 [dependencies]
 combine = "3.4"
-dynasm = "0.5"
-dynasmrt = "0.5"
+dynasm = "1.0"
+dynasmrt = "1.0"
 libc = "0.2.48"
