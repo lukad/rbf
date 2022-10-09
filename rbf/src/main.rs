@@ -1,10 +1,11 @@
 extern crate clap;
 extern crate librbf;
 
-use std::fs::File;
 use std::io::Write;
+use std::process::exit;
+use std::{fs::File, io::Read};
 
-use librbf::{parse, Jit};
+use librbf::{optimize, parse, Jit};
 
 use clap::{App, AppSettings, Arg};
 
@@ -36,10 +37,29 @@ fn main() {
         )
         .get_matches();
 
-    let source_path = matches.value_of("PROGRAM").unwrap();
-    let file = File::open(source_path).expect("Could not read program");
+    let source = {
+        let source_path = matches.value_of("PROGRAM").unwrap();
+        let mut file = File::open(source_path).expect("Could not open file");
+        let mut source = String::new();
+        file.read_to_string(&mut source)
+            .expect("Could not read file");
+        source
+    };
 
-    let program = parse(file);
+    let (program, err) = parse(&source);
+
+    if err.is_error() {
+        err.report().eprint(&source);
+        exit(1);
+    }
+
+    let program = if let Some(prog) = program {
+        prog
+    } else {
+        exit(1);
+    };
+
+    let program = optimize(program);
 
     if let Some("ast") = matches.value_of("emit") {
         println!("{:?}", program);

@@ -2,9 +2,11 @@
 name = "librbf"
 version = "0.1.0"
 authors = ["Luka Dornhecker <luka.dornhecker@gmail.com>"]
+edition = "2021"
 
 [dependencies]
-combine = "3.4"
+chumsky = "0.8.0"
+ariadne = "0.1.5"
 dynasm = "1.0"
 dynasmrt = "1.0"
 libc = "0.2.48"
