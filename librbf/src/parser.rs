@@ -1,152 +1,163 @@
-use std::collections::HashMap;
-use std::io::Read;
+use crate::ast::Instruction::*;
+use crate::ast::*;
 
-use ast::Instruction::*;
-use ast::*;
+use ariadne::{Color, Fmt, Label, Report, Source};
+use chumsky::error::SimpleReason;
+use chumsky::prelude::*;
 
-use combine::byte::byte;
-use combine::{
-    between, choice, eof, many, many1, satisfy, skip_many,
-    stream::{buffered::BufferedStream, state::State, ReadStream},
-    Parser, Stream,
-};
-
-parser! {
-    #[inline(always)]
-    fn program[I]()(I) -> Program
-        where [I: Stream<Item=u8>]
-    {
-        let comments = || skip_many(satisfy(|c| !"+-><,.[]".bytes().any(|t| t == c)));
-        let chars = |c| many1::<Vec<_>, _>(byte(c));
-
-        let add = chars(b'+').map(|s: _| Add(s.len() as i64));
-        let sub = chars(b'-').map(|s: _| Add(-(s.len() as i64)));
-        let left = chars(b'<').map(|s: _| Move(-(s.len() as i64)));
-        let right = chars(b'>').map(|s: _| Move(s.len() as i64));
-        let read = byte(b',').map(|_| Read);
-        let write = byte(b'.').map(|_| Write);
-
-        let bfloop = between(byte(b'['), byte(b']'), program()).map(Loop);
-
-        let instruction = choice((
-            add,
-            sub,
-            left,
-            right,
-            read,
-            write,
-            bfloop
-        )).skip(comments());
-
-        (
-            comments(),
-            many(instruction)
-        ).map(|(_comments, instructions)| instructions)
-    }
+fn program() -> impl Parser<char, Program, Error = Simple<char>> {
+    recursive(|prog| {
+        let counted = |neg, pos, m: fn(i64) -> _| {
+            just(neg)
+                .repeated()
+                .at_least(1)
+                .map(move |i| m(-(i.len() as i64)))
+                .or(just(pos)
+                    .repeated()
+                    .at_least(1)
+                    .map(move |i| m(i.len() as i64)))
+                .map_with_span(|i, span| (i, span))
+        };
+        let add = counted('-', '+', Add);
+        let mov = counted('<', '>', Move);
+        let write = just('.').map_with_span(|_, span| (Write, span));
+        let read = just(',').map_with_span(|_, span| (Read, span));
+        choice((add, mov, write, read))
+            .or(prog
+                .delimited_by(just('['), just(']'))
+                .map_with_span(|l, span| (Loop(l), span)))
+            .recover_with(nested_delimiters('[', ']', [], |_| {
+                unreachable!();
+            }))
+            .recover_with(skip_then_retry_until([']']))
+            .padded_by(none_of("+-[]<>,.").repeated())
+            .repeated()
+    })
+    .then_ignore(end())
 }
 
-fn optimize(program: Program) -> Program {
-    let mut iter = program.iter().peekable();
-    let mut prog: Program = vec![];
+#[derive(Debug)]
+pub struct ParseError(Vec<Simple<char>>);
 
-    while let Some(current) = iter.next() {
-        match (current, iter.peek()) {
-            (Add(0), _) => (),
-            (Move(0), _) => (),
+pub struct ErrorReport(Vec<Report>);
 
-            (Add(a), Some(Add(b))) => {
-                iter.next();
-                prog.push(Add(a + b))
-            }
-            (Move(a), Some(Move(b))) => {
-                iter.next();
-                prog.push(Move(a + b))
-            }
-
-            (Loop(ref body), _) => {
-                if let Some(optimized_body) = optimize_loop(body.clone()) {
-                    prog.extend(optimized_body);
-                }
-            }
-
-            (Set(a), Some(Add(b))) => {
-                iter.next();
-                prog.push(Set(a + b))
-            }
-            (Add(_), Some(Set(a))) => {
-                iter.next();
-                prog.push(Set(*a))
-            }
-            (Set(_), Some(Set(a))) => {
-                iter.next();
-                prog.push(Set(*a))
-            }
-            (Set(0), Some(Loop(_))) => {
-                iter.next();
-                prog.push(Set(0))
-            }
-            (Set(0), Some(Mul(_, _))) => {
-                prog.push(Set(0));
-                while let Some(Mul(_, _)) = iter.next() {}
-            }
-
-            _ => prog.push(current.clone()),
+impl ErrorReport {
+    pub fn eprint(self, source: &str) {
+        for report in self.0.into_iter() {
+            report.eprint(Source::from(source)).unwrap();
         }
     }
-    prog
 }
 
-fn optimize_loop(program: Program) -> Option<Vec<Instruction>> {
-    match *program {
-        [] => None,
-        [Add(-1)] => Some(vec![Set(0)]),
-        [Move(n)] => Some(vec![Scan(n)]),
-        [Set(0)] => Some(vec![Set(0)]),
-        _ => Some(optimize_mul(optimize(program))),
+impl ParseError {
+    pub fn is_error(&self) -> bool {
+        self.0.len() > 0
+    }
+
+    pub fn report(&self) -> ErrorReport {
+        let reports = self
+            .0
+            .iter()
+            .map(|e| e.clone().map(|c| c.to_string()))
+            .map(|e| {
+                let report = Report::build(ariadne::ReportKind::Error, (), e.span().start);
+                let report = match e.reason() {
+                    SimpleReason::Unclosed { span, delimiter } => report
+                        .with_message(format!(
+                            "Unclosed delimiter {}",
+                            delimiter.fg(Color::Yellow)
+                        ))
+                        .with_label(Label::new(span.clone()).with_message(format!(
+                            "Unclosed delimiter {}",
+                            delimiter.fg(Color::Yellow)
+                        ))),
+                    SimpleReason::Unexpected => report
+                        .with_message(format!(
+                            "{}, expected {}",
+                            if e.found().is_some() {
+                                "Unexpected token in input"
+                            } else {
+                                "Unexpected end of input"
+                            },
+                            if e.expected().len() == 0 {
+                                "something else".to_string()
+                            } else {
+                                e.expected()
+                                    .map(|expected| match expected {
+                                        Some(expected) => expected.fg(Color::Cyan).to_string(),
+                                        None => "end of input".to_string(),
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            }
+                        ))
+                        .with_label(
+                            Label::new(e.span())
+                                .with_message(format!(
+                                    "Unexpected token {}",
+                                    e.found()
+                                        .unwrap_or(&"end of file".to_string())
+                                        .fg(Color::Red)
+                                ))
+                                .with_color(Color::Red),
+                        ),
+                    SimpleReason::Custom(_) => todo!(),
+                };
+                report.finish()
+            })
+            .collect::<Vec<_>>();
+        ErrorReport(reports)
     }
 }
 
-fn optimize_mul(program: Program) -> Vec<Instruction> {
-    let mut muls = HashMap::new();
-    let mut offset = 0;
-    let mut is_mul = true;
-
-    for ins in program.iter() {
-        match ins {
-            Add(i) => *muls.entry(offset).or_insert(0) += i,
-            Move(i) => offset += i,
-            _ => is_mul = false,
-        }
-    }
-
-    if !is_mul || offset != 0 || muls.get(&0) != Some(&-1) {
-        return vec![Loop(program)];
-    }
-
-    let mut result: Vec<_> = muls
-        .iter()
-        .map(|(&k, &v)| if k == 0 { None } else { Some(Mul(k, v)) })
-        .filter_map(|x| x)
-        .collect();
-    result.push(Set(0));
-    result
+pub fn parse(input: &str) -> (Option<Program>, ParseError) {
+    let (prog, err) = program().parse_recovery(input);
+    (prog, ParseError(err))
 }
 
-fn opt(program: Program) -> Program {
-    let mut opt_a = optimize(program);
-    let mut opt_b = optimize(opt_a.clone());
+#[cfg(test)]
+mod test {
+    use crate::{ast::Instruction::*, Program};
 
-    while opt_a != opt_b {
-        opt_a = optimize(opt_b.clone());
-        opt_b = optimize(opt_a.clone());
+    fn parse(input: &str) -> Program {
+        crate::parse(input).0.unwrap()
     }
 
-    opt_b
-}
+    #[test]
+    fn it_parses_simple_programs() {
+        assert_eq!(parse("."), vec![(Write, 0..1)]);
+        assert_eq!(parse(".."), vec![(Write, 0..1), (Write, 1..2)]);
+        assert_eq!(parse(","), vec![(Read, 0..1)]);
+        assert_eq!(parse(",,"), vec![(Read, 0..1), (Read, 1..2)]);
+        assert_eq!(parse("++++"), vec![(Add(4), 0..4)]);
+        assert_eq!(parse("----"), vec![(Add(-4), 0..4)]);
+        assert_eq!(parse("++++---"), vec![(Add(4), 0..4), (Add(-3), 4..7)]);
+        assert_eq!(parse("++++ ---"), vec![(Add(4), 0..4), (Add(-3), 5..8)]);
+        assert_eq!(parse("++++@---"), vec![(Add(4), 0..4), (Add(-3), 5..8)]);
+        assert_eq!(parse("f + o - o"), vec![(Add(1), 2..3), (Add(-1), 6..7)]);
+        assert_eq!(parse(">>>>"), vec![(Move(4), 0..4)]);
+        assert_eq!(parse("<<<<"), vec![(Move(-4), 0..4)]);
+        assert_eq!(parse(">>>><<<"), vec![(Move(4), 0..4), (Move(-3), 4..7)]);
+        assert_eq!(parse(">>>> <<<"), vec![(Move(4), 0..4), (Move(-3), 5..8)]);
+        assert_eq!(parse(">>>>@<<<"), vec![(Move(4), 0..4), (Move(-3), 5..8)]);
+        assert_eq!(parse("f > o < o"), vec![(Move(1), 2..3), (Move(-1), 6..7)]);
+    }
 
-/// Parses Brainfuck source and returns a [Program](type.Program.html).
-pub fn parse<R: Read>(input: R) -> Program {
-    let stream = BufferedStream::new(State::new(ReadStream::new(input)), 1);
-    let ((prog, _eof), _state) = (program(), eof()).parse(stream).unwrap();
-    opt(prog)
+    #[test]
+    fn it_parses_loops() {
+        assert_eq!(parse("[]"), vec![(Loop(vec![]), 0..2)]);
+        assert_eq!(parse("[-]"), vec![(Loop(vec![(Add(-1), 1..2)]), 0..3)]);
+        assert_eq!(
+            parse("[[-]]"),
+            vec![(Loop(vec![(Loop(vec![(Add(-1), 2..3)]), 1..4)]), 0..5)]
+        );
+
+        assert_eq!(
+            parse("[+][-]"),
+            vec![
+                (Loop(vec![(Add(1), 1..2)]), 0..3),
+                (Loop(vec![(Add(-1), 4..5)]), 3..6),
+            ]
+        );
+    }
 }

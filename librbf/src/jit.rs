@@ -1,9 +1,11 @@
-use ast::{Instruction::*, Program};
-use dynasm::dynasm;
-use dynasmrt::{DynasmApi, DynasmLabelApi, ExecutableBuffer};
 use std::io::Read;
 use std::io::{self, Write};
 use std::mem;
+
+use dynasm::dynasm;
+use dynasmrt::{DynasmApi, DynasmLabelApi, ExecutableBuffer};
+
+use crate::ast::{Instruction::*, Program};
 
 extern "C" fn putchar(c: u8) {
     print!("{}", c as char);
@@ -100,43 +102,43 @@ impl Jit {
     fn gen(&mut self, program: &Program) {
         for ins in program.iter() {
             match ins {
-                &Move(i) => {
+                &(Move(i), _) => {
                     dynasm!(self.ops
                             ; add rbx, i as _
                     );
                 }
-                &Add(i) => {
+                &(Add(i), _) => {
                     dynasm!(self.ops
                             ; add BYTE [rbx], i as _
                     );
                 }
-                Write => {
+                (Write, _) => {
                     dynasm!(self.ops
                             ; movzx rdi, [rbx]
                             ; mov rax, QWORD putchar as _
                             ; call rax
                     );
                 }
-                Read => {
+                (Read, _) => {
                     dynasm!(self.ops
                             ; mov rax, QWORD getchar as _
                             ; call rax
                             ; mov [rbx], al
                     );
                 }
-                Set(i) => {
+                (Set(i), _) => {
                     dynasm!(self.ops
                             ; mov BYTE [rbx], (i % 0xFF) as _
                     );
                 }
-                &Mul(offset, mul) => {
+                &(Mul(offset, mul), _) => {
                     dynasm!(self.ops
                             ; mov al, mul as _
                             ; mul BYTE [rbx]
                             ; add [rbx + offset as _], al
                     );
                 }
-                &Scan(i) => {
+                &(Scan(i), _) => {
                     let move_label = self.ops.new_dynamic_label();
                     let rest_label = self.ops.new_dynamic_label();
                     dynasm!(self.ops
@@ -149,7 +151,7 @@ impl Jit {
                             ; =>rest_label
                     );
                 }
-                Loop(body) => {
+                (Loop(body), _) => {
                     let body_label = self.ops.new_dynamic_label();
                     let rest_label = self.ops.new_dynamic_label();
                     dynasm!(self.ops

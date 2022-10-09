@@ -1,5 +1,8 @@
 /// A Vector of [`Instruction`](enum.Instruction.html) representing a Brainfuck program.
-pub type Program = Vec<Instruction>;
+pub type Program = Vec<Spanned<Instruction>>;
+
+pub type Span = std::ops::Range<usize>;
+pub type Spanned<T> = (T, Span);
 
 /// An enum representing all brainfuck instructions.
 #[derive(Clone, Debug, PartialEq)]
