@@ -1,10 +1,11 @@
 [package]
 name = "librbf"
 version = "0.1.0"
-authors = ["Luka Dornhecker <luka.dornhecker@gmail.com>"]
+authors = ["Luka Dornhecker"]
+edition = "2024"
 
 [dependencies]
 combine = "3.4"
-dynasm = "1.0"
-dynasmrt = "1.0"
-libc = "0.2.48"
+dynasm = "5.0"
+dynasmrt = "5.0"
+libc = "0.2"

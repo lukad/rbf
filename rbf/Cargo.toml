@@ -1,9 +1,10 @@
 [package]
 name = "rbf"
 version = "0.1.0"
-authors = ["Luka Dornhecker <luka.dornhecker@gmail.com>"]
+authors = ["Luka Dornhecker"]
 description = "Optimizing Brainfuck JIT interpreter"
+edition = "2024"
 
 [dependencies]
 librbf = { path = "../librbf", version = "0.1.0" }
-clap = "2.32"
+clap = { version = "4", features = ["derive"] }

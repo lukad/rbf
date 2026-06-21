@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 use std::io::Read;
 
-use ast::Instruction::*;
-use ast::*;
+use crate::ast::{Instruction::*, *};
 
-use combine::byte::byte;
 use combine::{
-    between, choice, eof, many, many1, satisfy, skip_many,
-    stream::{buffered::BufferedStream, state::State, ReadStream},
-    Parser, Stream,
+    Parser, Stream, between,
+    byte::byte,
+    choice, eof, many, many1, satisfy, skip_many,
+    stream::{ReadStream, buffered::BufferedStream, state::State},
 };
 
 parser! {
@@ -63,7 +62,7 @@ fn optimize(program: Program) -> Program {
                 prog.push(Move(a + b))
             }
 
-            (Loop(ref body), _) => {
+            (Loop(body), _) => {
                 if let Some(optimized_body) = optimize_loop(body.clone()) {
                     prog.extend(optimized_body);
                 }
@@ -125,8 +124,7 @@ fn optimize_mul(program: Program) -> Vec<Instruction> {
 
     let mut result: Vec<_> = muls
         .iter()
-        .map(|(&k, &v)| if k == 0 { None } else { Some(Mul(k, v)) })
-        .filter_map(|x| x)
+        .filter_map(|(&k, &v)| (k != 0).then_some(Mul(k, v)))
         .collect();
     result.push(Set(0));
     result
