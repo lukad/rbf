@@ -1,6 +1,7 @@
 use super::Function;
 use super::common::{getchar, memzero, putchar};
 use crate::ast::{Instruction::*, Program};
+use crate::jit::common::putbytes;
 use dynasm::dynasm;
 use dynasmrt::{DynasmApi, DynasmLabelApi};
 
@@ -89,6 +90,32 @@ impl Jit {
                     dynasm!(self.ops
                             ; .arch aarch64
                             ; ldrb w0, [x19]
+                            ; blr x16
+                    );
+                }
+                WriteConst(i) => {
+                    self.load_x9((i % 0xFF) as u8 as u64);
+                    self.load_x16(putchar as *const () as u64);
+                    dynasm!(self.ops
+                            ; .arch aarch64
+                            ; strb w9, [x19]
+                            ; ldrb w0, [x19]
+                            ; blr x16
+                    );
+                }
+                WriteBytes(bytes) => {
+                    self.load_x16(putbytes as *const () as u64);
+                    self.load_x9(bytes.as_ptr() as u64);
+                    self.load_x10(bytes.len() as u64);
+
+                    let last = *bytes.last().unwrap();
+                    self.load_x11(last as u64);
+
+                    dynasm!(self.ops
+                            ; .arch aarch64
+                            ; strb w11, [x19]
+                            ; mov x0, x9
+                            ; mov x1, x10
                             ; blr x16
                     );
                 }
@@ -246,6 +273,21 @@ impl Jit {
                 ; movk x10, #p1, lsl #16
                 ; movk x10, #p2, lsl #32
                 ; movk x10, #p3, lsl #48
+        );
+    }
+
+    fn load_x11(&mut self, value: u64) {
+        let p0 = (value & 0xFFFF) as u32;
+        let p1 = ((value >> 16) & 0xFFFF) as u32;
+        let p2 = ((value >> 32) & 0xFFFF) as u32;
+        let p3 = ((value >> 48) & 0xFFFF) as u32;
+
+        dynasm!(self.ops
+                ; .arch aarch64
+                ; movz x11, #p0
+                ; movk x11, #p1, lsl #16
+                ; movk x11, #p2, lsl #32
+                ; movk x11, #p3, lsl #48
         );
     }
 

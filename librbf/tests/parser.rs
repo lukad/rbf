@@ -105,13 +105,13 @@ fn it_omits_sets_before_sets() {
 }
 
 #[test]
-fn it_omits_loops_after_set_0() {
-    assert_eq!(parse("[-][>+.<-]."), [Set(0), Write]);
+fn it_omits_loops_after_set() {
+    assert_eq!(parse("[-][>+.<-]."), [WriteConst(0)]);
 }
 
 #[test]
 fn it_omits_muls_after_set_0() {
-    assert_eq!(parse("[-][>+<-]."), [Set(0), Write]);
+    assert_eq!(parse("[-][>+<-]."), [WriteConst(0)]);
 }
 
 #[test]

@@ -19,6 +19,10 @@ pub enum Instruction {
     Read,
     /// Writes the current data cell's content to STDOUT as ASCII.
     Write,
+    /// Writes a constant byte to STDOUT as ASCII.
+    WriteConst(i64),
+    /// Writes a sequence of bytes to STDOUT.
+    WriteBytes(Vec<u8>),
     /// Repeats the `Loop` body until the current data cell is `0`.
     Loop(Program),
 }

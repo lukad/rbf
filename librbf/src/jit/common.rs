@@ -7,6 +7,11 @@ pub(crate) extern "C" fn putchar(c: u8) {
     print!("{}", c as char);
 }
 
+pub(crate) extern "C" fn putbytes(buf: *const u8, count: u64) {
+    let bytes = unsafe { std::slice::from_raw_parts(buf, count as usize) };
+    std::io::stdout().write_all(bytes).unwrap();
+}
+
 pub(crate) extern "C" fn getchar() -> u8 {
     io::stdout().flush().unwrap();
     let mut buf = [0];
@@ -22,18 +27,17 @@ pub(crate) extern "C" fn memzero(dst: *mut u8, count: usize) {
 
 #[derive(Debug)]
 pub struct Function {
-    _buf: ExecutableBuffer,
-    fun: extern "C" fn(),
+    buf: ExecutableBuffer,
+    start: AssemblyOffset,
 }
 
 impl Function {
     pub(super) fn new(buf: ExecutableBuffer, start: AssemblyOffset) -> Self {
-        let fun: extern "C" fn() = unsafe { mem::transmute(buf.ptr(start)) };
-
-        Self { _buf: buf, fun }
+        Self { buf, start }
     }
 
     pub fn run(&self) {
-        (self.fun)();
+        let fun: extern "C" fn() = unsafe { mem::transmute(self.buf.ptr(self.start)) };
+        (fun)();
     }
 }

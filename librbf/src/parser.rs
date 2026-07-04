@@ -89,6 +89,34 @@ fn optimize(program: Program) -> Program {
                 while let Some(Mul(_, _)) = iter.next() {}
             }
 
+            (Set(n), Some(Write)) => {
+                iter.next();
+                prog.push(WriteConst(*n));
+            }
+
+            (WriteConst(n), Some(WriteConst(m))) => {
+                iter.next();
+                prog.push(WriteBytes(vec![(*n % 0xFF) as u8, (*m % 0xFF) as u8]))
+            }
+            (WriteBytes(b), Some(WriteConst(n))) => {
+                iter.next();
+                let mut b = b.clone();
+                b.push((*n % 0xFF) as u8);
+                prog.push(WriteBytes(b));
+            }
+            (WriteBytes(b), Some(WriteBytes(c))) => {
+                iter.next();
+                let mut b = b.clone();
+                b.extend_from_slice(c);
+                prog.push(WriteBytes(b));
+            }
+            (WriteConst(n), Some(WriteBytes(b))) => {
+                iter.next();
+                let mut b = b.clone();
+                b.insert(0, (*n % 0xFF) as u8);
+                prog.push(WriteBytes(b));
+            }
+
             _ => prog.push(current.clone()),
         }
     }
