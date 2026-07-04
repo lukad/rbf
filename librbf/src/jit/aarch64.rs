@@ -5,6 +5,30 @@ use crate::jit::common::putbytes;
 use dynasm::dynasm;
 use dynasmrt::{DynasmApi, DynasmLabelApi};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reg {
+    Arg0 = 0,
+    Arg1 = 1,
+    Scratch0 = 9,
+    Scratch1 = 10,
+    Scratch2 = 11,
+    MulSource = 12,
+    HelperTarget = 16,
+    TapePtr = 19,
+    PutCharTarget = 20,
+    PutBytesTarget = 21,
+    GetCharTarget = 22,
+    FramePtr = 29,
+    Link = 30,
+    StackPtr = 31,
+}
+
+impl From<Reg> for u8 {
+    fn from(reg: Reg) -> Self {
+        reg as u8
+    }
+}
+
 /// Compiles brainfuck code and returns a `Function`.
 ///
 /// The AArch64 backend follows AAPCS64. The tape pointer lives in x19, which is
@@ -37,34 +61,44 @@ impl Jit {
     pub fn compile(mut self, program: &Program) -> Function {
         dynasm!(self.ops
                 ; .arch aarch64
-                ; stp x29, x30, [sp, #-16]!
-                ; mov x29, sp
-                ; stp x19, x20, [sp, #-16]!
+                ; stp X(Reg::FramePtr), X(Reg::Link), [XSP(Reg::StackPtr), #-16]!
+                ; mov XSP(Reg::FramePtr), XSP(Reg::StackPtr)
+                ; stp X(Reg::TapePtr), X(Reg::PutCharTarget), [XSP(Reg::StackPtr), #-16]!
+                ; stp X(Reg::PutBytesTarget), X(Reg::GetCharTarget), [XSP(Reg::StackPtr), #-16]!
         );
 
-        self.load_x9(self.tape_size as u64);
+        self.load_x(Reg::Scratch0, self.tape_size as u64);
         dynasm!(self.ops
                 ; .arch aarch64
-                ; sub sp, sp, x9
-                ; mov x19, sp
+                ; sub XSP(Reg::StackPtr), XSP(Reg::StackPtr), X(Reg::Scratch0)
+                ; mov XSP(Reg::TapePtr), XSP(Reg::StackPtr)
         );
 
-        self.load_x1(self.tape_size as u64);
-        self.load_x16(memzero as *const () as u64);
+        self.load_x(Reg::Arg1, self.tape_size as u64);
+        self.load_x(Reg::HelperTarget, memzero as *const () as u64);
         dynasm!(self.ops
                 ; .arch aarch64
-                ; mov x0, x19
-                ; blr x16
+                ; mov X(Reg::Arg0), X(Reg::TapePtr)
+                ; blr X(Reg::HelperTarget)
         );
+
+        self.load_x(Reg::PutCharTarget, putchar as *const () as u64);
+        self.load_x(Reg::PutBytesTarget, putbytes as *const () as u64);
+        self.load_x(Reg::GetCharTarget, getchar as *const () as u64);
 
         self.generate(program);
 
-        self.load_x9(self.tape_size as u64);
+        self.load_x(Reg::Scratch0, self.tape_size as u64);
         dynasm!(self.ops
                 ; .arch aarch64
-                ; add sp, sp, x9
-                ; ldp x19, x20, [sp], #16
-                ; ldp x29, x30, [sp], #16
+                ; add XSP(Reg::StackPtr), XSP(Reg::StackPtr), X(Reg::Scratch0)
+        );
+
+        dynasm!(self.ops
+                ; .arch aarch64
+                ; ldp X(Reg::PutBytesTarget), X(Reg::GetCharTarget), [XSP(Reg::StackPtr)], #16
+                ; ldp X(Reg::TapePtr), X(Reg::PutCharTarget), [XSP(Reg::StackPtr)], #16
+                ; ldp X(Reg::FramePtr), X(Reg::Link), [XSP(Reg::StackPtr)], #16
                 ; ret
         );
 
@@ -77,61 +111,63 @@ impl Jit {
             match ins {
                 &Move(i) => self.move_tape(i),
                 &Add(i) => {
-                    self.load_x10(i as u8 as u64);
+                    self.load_x(Reg::Scratch1, i as u8 as u64);
                     dynasm!(self.ops
                             ; .arch aarch64
-                            ; ldrb w9, [x19]
-                            ; add w9, w9, w10
-                            ; strb w9, [x19]
+                            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+                            ; add W(Reg::Scratch0), W(Reg::Scratch0), W(Reg::Scratch1)
+                            ; strb W(Reg::Scratch0), [X(Reg::TapePtr)]
                     );
                 }
                 Write => {
-                    self.load_x16(putchar as *const () as u64);
                     dynasm!(self.ops
                             ; .arch aarch64
-                            ; ldrb w0, [x19]
-                            ; blr x16
+                            ; ldrb W(Reg::Arg0), [X(Reg::TapePtr)]
+                            ; blr X(Reg::PutCharTarget)
                     );
                 }
                 WriteConst(i) => {
-                    self.load_x9((i % 0xFF) as u8 as u64);
-                    self.load_x16(putchar as *const () as u64);
+                    self.load_x(Reg::Arg0, (i % 0xFF) as u8 as u64);
                     dynasm!(self.ops
                             ; .arch aarch64
-                            ; strb w9, [x19]
-                            ; ldrb w0, [x19]
-                            ; blr x16
+                            ; strb W(Reg::Arg0), [X(Reg::TapePtr)]
+                            ; blr X(Reg::PutCharTarget)
                     );
                 }
                 WriteBytes(bytes) => {
-                    self.load_x16(putbytes as *const () as u64);
-                    self.load_x9(bytes.as_ptr() as u64);
-                    self.load_x10(bytes.len() as u64);
-
                     let last = *bytes.last().unwrap();
-                    self.load_x11(last as u64);
+                    self.load_x(Reg::Scratch0, last as u64);
+                    dynasm!(self.ops
+                            ; .arch aarch64
+                            ; strb W(Reg::Scratch0), [X(Reg::TapePtr)]
+                    );
+
+                    self.load_x(Reg::Arg0, bytes.as_ptr() as u64);
+                    self.load_x(Reg::Arg1, bytes.len() as u64);
 
                     dynasm!(self.ops
                             ; .arch aarch64
-                            ; strb w11, [x19]
-                            ; mov x0, x9
-                            ; mov x1, x10
-                            ; blr x16
+                            ; blr X(Reg::PutBytesTarget)
                     );
                 }
                 Read => {
-                    self.load_x16(getchar as *const () as u64);
                     dynasm!(self.ops
                             ; .arch aarch64
-                            ; blr x16
-                            ; strb w0, [x19]
+                            ; blr X(Reg::GetCharTarget)
+                            ; strb W(Reg::Arg0), [X(Reg::TapePtr)]
+                    );
+                }
+                Set(0) => {
+                    dynasm!(self.ops
+                            ; .arch aarch64
+                            ; strb wzr, [X(Reg::TapePtr)]
                     );
                 }
                 Set(i) => {
-                    self.load_x9((i % 0xFF) as u8 as u64);
+                    self.load_x(Reg::Scratch0, (i % 0xFF) as u8 as u64);
                     dynasm!(self.ops
                             ; .arch aarch64
-                            ; strb w9, [x19]
+                            ; strb W(Reg::Scratch0), [X(Reg::TapePtr)]
                     );
                 }
                 &Mul(offset, factor) => {
@@ -145,8 +181,8 @@ impl Jit {
                     let rest_label = self.ops.new_dynamic_label();
                     dynasm!(self.ops
                             ; .arch aarch64
-                            ; ldrb w9, [x19]
-                            ; cbz w9, =>rest_label
+                            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+                            ; cbz W(Reg::Scratch0), =>rest_label
                             ; =>move_label
                     );
 
@@ -154,8 +190,8 @@ impl Jit {
 
                     dynasm!(self.ops
                             ; .arch aarch64
-                            ; ldrb w9, [x19]
-                            ; cbnz w9, =>move_label
+                            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+                            ; cbnz W(Reg::Scratch0), =>move_label
                             ; =>rest_label
                     );
                 }
@@ -164,8 +200,8 @@ impl Jit {
                     let rest_label = self.ops.new_dynamic_label();
                     dynasm!(self.ops
                             ; .arch aarch64
-                            ; ldrb w9, [x19]
-                            ; cbz w9, =>rest_label
+                            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+                            ; cbz W(Reg::Scratch0), =>rest_label
                             ; =>body_label
                     );
 
@@ -173,8 +209,8 @@ impl Jit {
 
                     dynasm!(self.ops
                             ; .arch aarch64
-                            ; ldrb w9, [x19]
-                            ; cbnz w9, =>body_label
+                            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+                            ; cbnz W(Reg::Scratch0), =>body_label
                             ; =>rest_label
                     );
                 }
@@ -188,32 +224,33 @@ impl Jit {
     /// When `factor` is 1 or -1 this is effectively just an addition or subtraction
     /// and a specialized path without multiplication is taken.
     fn generate_mul(&mut self, offset: i64, factor: i64) {
-        self.compute_offset_x11(offset);
+        let addr = Reg::Scratch2;
+        self.compute_offset(addr, offset);
 
         match factor {
             1 => dynasm!(self.ops
                 ; .arch aarch64
-                ; ldrb w9, [x19]
-                ; ldrb w10, [x11]
-                ; add w10, w10, w9
-                ; strb w10, [x11]
+                ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+                ; ldrb W(Reg::Scratch1), [X(addr)]
+                ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::Scratch0)
+                ; strb W(Reg::Scratch1), [X(addr)]
             ),
             -1 => dynasm!(self.ops
                 ; .arch aarch64
-                ; ldrb w9, [x19]
-                ; ldrb w10, [x11]
-                ; sub w10, w10, w9
-                ; strb w10, [x11]
+                ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+                ; ldrb W(Reg::Scratch1), [X(addr)]
+                ; sub W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::Scratch0)
+                ; strb W(Reg::Scratch1), [X(addr)]
             ),
             _ => {
-                self.load_x10(factor as u8 as u64);
+                self.load_x(Reg::Scratch1, factor as u8 as u64);
                 dynasm!(self.ops
                     ; .arch aarch64
-                    ; ldrb w9, [x19]
-                    ; mul w9, w9, w10
-                    ; ldrb w10, [x11]
-                    ; add w10, w10, w9
-                    ; strb w10, [x11]
+                    ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+                    ; mul W(Reg::Scratch0), W(Reg::Scratch0), W(Reg::Scratch1)
+                    ; ldrb W(Reg::Scratch1), [X(addr)]
+                    ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::Scratch0)
+                    ; strb W(Reg::Scratch1), [X(addr)]
                 );
             }
         }
@@ -228,33 +265,34 @@ impl Jit {
         // Keep the original source cell live across all destination updates.
         dynasm!(self.ops
             ; .arch aarch64
-            ; ldrb w12, [x19]
+            ; ldrb W(Reg::MulSource), [X(Reg::TapePtr)]
         );
 
         for &(offset, factor) in muls {
-            self.compute_offset_x11(offset);
+            let addr = Reg::Scratch2;
+            self.compute_offset(addr, offset);
 
             match factor {
                 1 => dynasm!(self.ops
                     ; .arch aarch64
-                    ; ldrb w10, [x11]
-                    ; add w10, w10, w12
-                    ; strb w10, [x11]
+                    ; ldrb W(Reg::Scratch1), [X(addr)]
+                    ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::MulSource)
+                    ; strb W(Reg::Scratch1), [X(addr)]
                 ),
                 -1 => dynasm!(self.ops
                     ; .arch aarch64
-                    ; ldrb w10, [x11]
-                    ; sub w10, w10, w12
-                    ; strb w10, [x11]
+                    ; ldrb W(Reg::Scratch1), [X(addr)]
+                    ; sub W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::MulSource)
+                    ; strb W(Reg::Scratch1), [X(addr)]
                 ),
                 _ => {
-                    self.load_x10(factor as u8 as u64);
+                    self.load_x(Reg::Scratch1, factor as u8 as u64);
                     dynasm!(self.ops
                         ; .arch aarch64
-                        ; mul w9, w12, w10
-                        ; ldrb w10, [x11]
-                        ; add w10, w10, w9
-                        ; strb w10, [x11]
+                        ; mul W(Reg::Scratch0), W(Reg::MulSource), W(Reg::Scratch1)
+                        ; ldrb W(Reg::Scratch1), [X(addr)]
+                        ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::Scratch0)
+                        ; strb W(Reg::Scratch1), [X(addr)]
                     );
                 }
             }
@@ -263,7 +301,7 @@ impl Jit {
         // Finally clear the original source cell
         dynasm!(self.ops
             ; .arch aarch64
-            ; strb wzr, [x19]
+            ; strb wzr, [X(Reg::TapePtr)]
         );
     }
 
@@ -272,117 +310,119 @@ impl Jit {
             return;
         }
 
-        self.load_x9(offset.unsigned_abs());
-        if offset > 0 {
-            dynasm!(self.ops
-                    ; .arch aarch64
-                    ; add x19, x19, x9
-            );
-        } else {
-            dynasm!(self.ops
-                    ; .arch aarch64
-                    ; sub x19, x19, x9
-            );
-        }
-    }
+        let amount = offset.unsigned_abs();
 
-    fn compute_offset_x11(&mut self, offset: i64) {
-        dynasm!(self.ops
-                ; .arch aarch64
-                ; mov x11, x19
-        );
+        // Small moves can use the AArch64 immediate add/sub form directly.
+        if amount < 4096 {
+            let amount = amount as u32;
 
-        if offset == 0 {
+            if offset > 0 {
+                dynasm!(self.ops
+                    ; .arch aarch64
+                    ; add XSP(Reg::TapePtr), XSP(Reg::TapePtr), #amount
+                );
+            } else {
+                dynasm!(self.ops
+                    ; .arch aarch64
+                    ; sub XSP(Reg::TapePtr), XSP(Reg::TapePtr), #amount
+                );
+            }
             return;
         }
 
-        self.load_x9(offset.unsigned_abs());
+        self.load_x(Reg::Scratch0, amount);
+
         if offset > 0 {
             dynasm!(self.ops
                     ; .arch aarch64
-                    ; add x11, x11, x9
+                    ; add X(Reg::TapePtr), X(Reg::TapePtr), X(Reg::Scratch0)
             );
         } else {
             dynasm!(self.ops
                     ; .arch aarch64
-                    ; sub x11, x11, x9
+                    ; sub X(Reg::TapePtr), X(Reg::TapePtr), X(Reg::Scratch0)
             );
         }
     }
 
-    fn load_x1(&mut self, value: u64) {
-        let p0 = (value & 0xFFFF) as u32;
-        let p1 = ((value >> 16) & 0xFFFF) as u32;
-        let p2 = ((value >> 32) & 0xFFFF) as u32;
-        let p3 = ((value >> 48) & 0xFFFF) as u32;
+    fn compute_offset(&mut self, addr: Reg, offset: i64) {
+        debug_assert!(addr != Reg::Scratch0);
+
+        if offset == 0 {
+            dynasm!(self.ops
+                    ; .arch aarch64
+                    ; mov X(addr), X(Reg::TapePtr)
+            );
+            return;
+        }
+
+        let amount = offset.unsigned_abs();
+
+        if amount < 4096 {
+            let amount = amount as u32;
+
+            if offset > 0 {
+                dynasm!(self.ops
+                        ; .arch aarch64
+                        ; add XSP(addr), XSP(Reg::TapePtr), #amount
+                );
+            } else {
+                dynasm!(self.ops
+                        ; .arch aarch64
+                        ; sub XSP(addr), XSP(Reg::TapePtr), #amount
+                );
+            }
+            return;
+        }
 
         dynasm!(self.ops
                 ; .arch aarch64
-                ; movz x1, #p0
-                ; movk x1, #p1, lsl #16
-                ; movk x1, #p2, lsl #32
-                ; movk x1, #p3, lsl #48
+                ; mov X(addr), X(Reg::TapePtr)
         );
+
+        self.load_x(Reg::Scratch0, amount);
+        if offset > 0 {
+            dynasm!(self.ops
+                    ; .arch aarch64
+                    ; add X(addr), X(addr), X(Reg::Scratch0)
+            );
+        } else {
+            dynasm!(self.ops
+                    ; .arch aarch64
+                    ; sub X(addr), X(addr), X(Reg::Scratch0)
+            );
+        }
     }
 
-    fn load_x9(&mut self, value: u64) {
+    fn load_x(&mut self, reg: Reg, value: u64) {
         let p0 = (value & 0xFFFF) as u32;
         let p1 = ((value >> 16) & 0xFFFF) as u32;
         let p2 = ((value >> 32) & 0xFFFF) as u32;
         let p3 = ((value >> 48) & 0xFFFF) as u32;
 
         dynasm!(self.ops
-                ; .arch aarch64
-                ; movz x9, #p0
-                ; movk x9, #p1, lsl #16
-                ; movk x9, #p2, lsl #32
-                ; movk x9, #p3, lsl #48
+            ; .arch aarch64
+            ; movz X(reg), #p0
         );
-    }
 
-    fn load_x10(&mut self, value: u64) {
-        let p0 = (value & 0xFFFF) as u32;
-        let p1 = ((value >> 16) & 0xFFFF) as u32;
-        let p2 = ((value >> 32) & 0xFFFF) as u32;
-        let p3 = ((value >> 48) & 0xFFFF) as u32;
-
-        dynasm!(self.ops
+        if p1 != 0 {
+            dynasm!(self.ops
                 ; .arch aarch64
-                ; movz x10, #p0
-                ; movk x10, #p1, lsl #16
-                ; movk x10, #p2, lsl #32
-                ; movk x10, #p3, lsl #48
-        );
-    }
-
-    fn load_x11(&mut self, value: u64) {
-        let p0 = (value & 0xFFFF) as u32;
-        let p1 = ((value >> 16) & 0xFFFF) as u32;
-        let p2 = ((value >> 32) & 0xFFFF) as u32;
-        let p3 = ((value >> 48) & 0xFFFF) as u32;
-
-        dynasm!(self.ops
+                ; movk X(reg), #p1, lsl #16
+            );
+        }
+        if p2 != 0 {
+            dynasm!(self.ops
                 ; .arch aarch64
-                ; movz x11, #p0
-                ; movk x11, #p1, lsl #16
-                ; movk x11, #p2, lsl #32
-                ; movk x11, #p3, lsl #48
-        );
-    }
-
-    fn load_x16(&mut self, value: u64) {
-        let p0 = (value & 0xFFFF) as u32;
-        let p1 = ((value >> 16) & 0xFFFF) as u32;
-        let p2 = ((value >> 32) & 0xFFFF) as u32;
-        let p3 = ((value >> 48) & 0xFFFF) as u32;
-
-        dynasm!(self.ops
+                ; movk X(reg), #p2, lsl #32
+            );
+        }
+        if p3 != 0 {
+            dynasm!(self.ops
                 ; .arch aarch64
-                ; movz x16, #p0
-                ; movk x16, #p1, lsl #16
-                ; movk x16, #p2, lsl #32
-                ; movk x16, #p3, lsl #48
-        );
+                ; movk X(reg), #p3, lsl #48
+            );
+        }
     }
 }
 
