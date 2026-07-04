@@ -88,6 +88,10 @@ fn optimize(program: Program) -> Program {
                 prog.push(Set(0));
                 while let Some(Mul(_, _)) = iter.next() {}
             }
+            (Set(0), Some(MulRun(_))) => {
+                iter.next();
+                prog.push(Set(0))
+            }
 
             (Set(n), Some(Write)) => {
                 iter.next();
@@ -150,12 +154,17 @@ fn optimize_mul(program: Program) -> Vec<Instruction> {
         return vec![Loop(program)];
     }
 
-    let mut result: Vec<_> = muls
+    let mut transfers: Vec<_> = muls
         .iter()
-        .filter_map(|(&k, &v)| (k != 0).then_some(Mul(k, v)))
+        .filter_map(|(&k, &v)| (k != 0).then_some((k, v)))
         .collect();
-    result.push(Set(0));
-    result
+    transfers.sort_by_key(|&(offset, _)| offset);
+
+    if transfers.is_empty() {
+        vec![Set(0)]
+    } else {
+        vec![MulRun(transfers)]
+    }
 }
 
 fn opt(program: Program) -> Program {

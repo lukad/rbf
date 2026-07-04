@@ -134,17 +134,11 @@ impl Jit {
                             ; strb w9, [x19]
                     );
                 }
-                &Mul(offset, mul) => {
-                    self.compute_offset_x11(offset);
-                    self.load_x10(mul as u8 as u64);
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; ldrb w9, [x19]
-                            ; mul w9, w9, w10
-                            ; ldrb w10, [x11]
-                            ; add w10, w10, w9
-                            ; strb w10, [x11]
-                    );
+                &Mul(offset, factor) => {
+                    self.generate_mul(offset, factor);
+                }
+                MulRun(muls) => {
+                    self.generate_mul_run(muls);
                 }
                 &Scan(i) => {
                     let move_label = self.ops.new_dynamic_label();
@@ -186,6 +180,91 @@ impl Jit {
                 }
             }
         }
+    }
+
+    /// Generates code for `Instruction::Mul`.
+    ///
+    /// The general case is roughly `tape[ptr + offset] += tape[ptr] * factor`.
+    /// When `factor` is 1 or -1 this is effectively just an addition or subtraction
+    /// and a specialized path without multiplication is taken.
+    fn generate_mul(&mut self, offset: i64, factor: i64) {
+        self.compute_offset_x11(offset);
+
+        match factor {
+            1 => dynasm!(self.ops
+                ; .arch aarch64
+                ; ldrb w9, [x19]
+                ; ldrb w10, [x11]
+                ; add w10, w10, w9
+                ; strb w10, [x11]
+            ),
+            -1 => dynasm!(self.ops
+                ; .arch aarch64
+                ; ldrb w9, [x19]
+                ; ldrb w10, [x11]
+                ; sub w10, w10, w9
+                ; strb w10, [x11]
+            ),
+            _ => {
+                self.load_x10(factor as u8 as u64);
+                dynasm!(self.ops
+                    ; .arch aarch64
+                    ; ldrb w9, [x19]
+                    ; mul w9, w9, w10
+                    ; ldrb w10, [x11]
+                    ; add w10, w10, w9
+                    ; strb w10, [x11]
+                );
+            }
+        }
+    }
+
+    /// Generates code for `Instruction::MulRun`.
+    ///
+    /// Optimized multiplication loops read from one source cell, apply one or more
+    /// transfers, then clear the source. This loads the source once and reuses it
+    /// for every destination update.
+    fn generate_mul_run(&mut self, muls: &[(i64, i64)]) {
+        // Keep the original source cell live across all destination updates.
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; ldrb w12, [x19]
+        );
+
+        for &(offset, factor) in muls {
+            self.compute_offset_x11(offset);
+
+            match factor {
+                1 => dynasm!(self.ops
+                    ; .arch aarch64
+                    ; ldrb w10, [x11]
+                    ; add w10, w10, w12
+                    ; strb w10, [x11]
+                ),
+                -1 => dynasm!(self.ops
+                    ; .arch aarch64
+                    ; ldrb w10, [x11]
+                    ; sub w10, w10, w12
+                    ; strb w10, [x11]
+                ),
+                _ => {
+                    self.load_x10(factor as u8 as u64);
+                    dynasm!(self.ops
+                        ; .arch aarch64
+                        ; mul w9, w12, w10
+                        ; ldrb w10, [x11]
+                        ; add w10, w10, w9
+                        ; strb w10, [x11]
+                    );
+                }
+            }
+        }
+
+        // Finally clear the original source cell
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; strb wzr, [x19]
+        );
     }
 
     fn move_tape(&mut self, offset: i64) {

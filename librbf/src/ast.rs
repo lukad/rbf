@@ -13,6 +13,8 @@ pub enum Instruction {
     /// Multiplies the current cell with the second parameter and adds it to the cell at the
     /// offset given by the first parameter.
     Mul(i64, i64),
+    /// Applies multiple [`Mul`](Instruction::Mul) transfers, then clears the current cell.
+    MulRun(Vec<(i64, i64)>),
     /// Goes to the next `0` data cell, moving in specified increments.
     Scan(i64),
     /// Reads one byte from STDIN into the current data cell.

@@ -118,3 +118,13 @@ fn it_omits_muls_after_set_0() {
 fn it_transforms_move_loops_into_scans() {
     assert_eq!(parse("[>>>>]"), [Scan(4)]);
 }
+
+#[test]
+fn it_transforms_multiplication_loops_into_mul_runs() {
+    assert_eq!(parse("[>+<-]"), [MulRun(vec![(1, 1)])]);
+}
+
+#[test]
+fn it_orders_mul_run_offsets() {
+    assert_eq!(parse("[>+++>++<<-]"), [MulRun(vec![(1, 3), (2, 2)])]);
+}
