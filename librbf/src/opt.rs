@@ -2,100 +2,79 @@ use std::collections::HashMap;
 
 use crate::{Instruction, Program, ast::Instruction::*};
 
-fn optimize(program: Program) -> Program {
-    let mut iter = program.iter().peekable();
-    let mut prog: Program = vec![];
+pub fn optimize(program: Program) -> Program {
+    optimize_program(program)
+}
 
-    while let Some(current) = iter.next() {
-        match (current, iter.peek()) {
-            (Add(0), _) => (),
-            (Move(0), _) => (),
+fn optimize_program(program: Program) -> Program {
+    let mut out = Vec::with_capacity(program.len());
 
-            (Add(a), Some(Add(b))) => {
-                iter.next();
-                prog.push(Add(a + b))
-            }
-            (Move(a), Some(Move(b))) => {
-                iter.next();
-                prog.push(Move(a + b))
-            }
+    for ins in program {
+        optimize_instruction(&mut out, ins);
+    }
 
-            (Loop(body), _) => {
-                if let Some(optimized_body) = optimize_loop(body.clone()) {
-                    prog.extend(optimized_body);
-                }
-            }
+    out
+}
 
-            (Set(a), Some(Add(b))) => {
-                iter.next();
-                prog.push(Set(a + b))
+fn optimize_instruction(out: &mut Program, ins: Instruction) {
+    match ins {
+        Add(0) | Move(0) => (),
+        Loop(body) => {
+            if let Some(ins) = optimize_loop(optimize_program(body)) {
+                optimize_non_loop(out, ins);
             }
-            (Add(_), Some(Set(a))) => {
-                iter.next();
-                prog.push(Set(*a))
-            }
-            (Set(_), Some(Set(a))) => {
-                iter.next();
-                prog.push(Set(*a))
-            }
-            (Set(0), Some(Loop(_))) => {
-                iter.next();
-                prog.push(Set(0))
-            }
-            (Set(0), Some(Mul(_, _))) => {
-                prog.push(Set(0));
-                while let Some(Mul(_, _)) = iter.next() {}
-            }
-            (Set(0), Some(MulRun(_))) => {
-                iter.next();
-                prog.push(Set(0))
-            }
+        }
+        ins => optimize_non_loop(out, ins),
+    }
+}
 
-            (Set(n), Some(Write)) => {
-                iter.next();
-                prog.push(WriteConst(*n));
-            }
+fn optimize_non_loop(out: &mut Program, ins: Instruction) {
+    let Some(prev) = out.pop() else {
+        out.push(ins);
+        return;
+    };
 
-            (WriteConst(n), Some(WriteConst(m))) => {
-                iter.next();
-                prog.push(WriteBytes(vec![(*n % 0xFF) as u8, (*m % 0xFF) as u8]))
-            }
-            (WriteBytes(b), Some(WriteConst(n))) => {
-                iter.next();
-                let mut b = b.clone();
-                b.push((*n % 0xFF) as u8);
-                prog.push(WriteBytes(b));
-            }
-            (WriteBytes(b), Some(WriteBytes(c))) => {
-                iter.next();
-                let mut b = b.clone();
-                b.extend_from_slice(c);
-                prog.push(WriteBytes(b));
-            }
-            (WriteConst(n), Some(WriteBytes(b))) => {
-                iter.next();
-                let mut b = b.clone();
-                b.insert(0, (*n % 0xFF) as u8);
-                prog.push(WriteBytes(b));
-            }
+    match (prev, ins) {
+        (Add(a), Add(b)) => optimize_instruction(out, Add(a + b)),
+        (Move(a), Move(b)) => optimize_instruction(out, Move(a + b)),
+        (Set(a), Add(b)) => optimize_non_loop(out, Set(a + b)),
+        (Add(_), Set(n)) | (Set(_), Set(n)) => optimize_non_loop(out, Set(n)),
+        (Set(0), Loop(_)) | (Set(0), Mul(_, _)) | (Set(0), MulRun(_)) => out.push(Set(0)),
+        (Set(n), Write) => optimize_non_loop(out, WriteConst(n)),
+        (WriteConst(a), WriteConst(b)) => {
+            optimize_non_loop(out, WriteBytes(vec![byte(a), byte(b)]))
+        }
+        (WriteBytes(mut bytes), WriteConst(n)) => {
+            bytes.push(byte(n));
+            optimize_non_loop(out, WriteBytes(bytes));
+        }
+        (WriteBytes(mut bytes), WriteBytes(mut more)) => {
+            bytes.append(&mut more);
+            optimize_non_loop(out, WriteBytes(bytes));
+        }
+        (WriteConst(n), WriteBytes(mut bytes)) => {
+            bytes.insert(0, byte(n));
+            optimize_non_loop(out, WriteBytes(bytes));
+        }
 
-            _ => prog.push(current.clone()),
+        (prev, ins) => {
+            out.push(prev);
+            out.push(ins);
         }
     }
-    prog
 }
 
-fn optimize_loop(program: Program) -> Option<Vec<Instruction>> {
-    match *program {
+fn optimize_loop(program: Program) -> Option<Instruction> {
+    match &program[..] {
         [] => None,
-        [Add(-1)] => Some(vec![Set(0)]),
-        [Move(n)] => Some(vec![Scan(n)]),
-        [Set(0)] => Some(vec![Set(0)]),
-        _ => Some(optimize_mul(optimize(program))),
+        [Add(-1)] => Some(Set(0)),
+        [Move(n)] => Some(Scan(*n)),
+        [Set(0)] => Some(Set(0)),
+        _ => Some(optimize_mul(program)),
     }
 }
 
-fn optimize_mul(program: Program) -> Vec<Instruction> {
+fn optimize_mul(program: Program) -> Instruction {
     let mut muls = HashMap::new();
     let mut offset = 0;
     let mut is_mul = true;
@@ -109,7 +88,7 @@ fn optimize_mul(program: Program) -> Vec<Instruction> {
     }
 
     if !is_mul || offset != 0 || muls.get(&0) != Some(&-1) {
-        return vec![Loop(program)];
+        return Loop(program);
     }
 
     let mut transfers: Vec<_> = muls
@@ -119,20 +98,12 @@ fn optimize_mul(program: Program) -> Vec<Instruction> {
     transfers.sort_by_key(|&(offset, _)| offset);
 
     if transfers.is_empty() {
-        vec![Set(0)]
+        Set(0)
     } else {
-        vec![MulRun(transfers)]
+        MulRun(transfers)
     }
 }
 
-pub fn opt(program: Program) -> Program {
-    let mut opt_a = optimize(program);
-    let mut opt_b = optimize(opt_a.clone());
-
-    while opt_a != opt_b {
-        opt_a = optimize(opt_b.clone());
-        opt_b = optimize(opt_a.clone());
-    }
-
-    opt_b
+fn byte(i: i64) -> u8 {
+    (i % 0xFF) as u8
 }

@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, ValueEnum};
-use librbf::{Jit, opt, parse};
+use librbf::{Jit, optimize, parse};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -40,7 +40,7 @@ fn main() {
     let file = File::open(args.program).expect("Could not read program");
 
     let parse = parse(file);
-    let program = if args.opt { opt(parse) } else { parse };
+    let program = if args.opt { optimize(parse) } else { parse };
 
     if matches!(args.emit, Some(Emit::Ast)) {
         println!("{:?}", program);

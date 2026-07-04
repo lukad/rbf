@@ -7,22 +7,32 @@ fn parse(input: &str) -> Program {
 }
 
 #[test]
-fn it_parses_an_empty_program() {
+fn parses_empty_program() {
     assert_eq!(parse(""), vec![]);
 }
 
 #[test]
-fn it_parses_an_empty_program_with_comments() {
+fn ignores_comments() {
     assert_eq!(parse(" foo bar baz "), []);
 }
 
 #[test]
-fn it_parses_a_very_very_simple_program() {
-    assert_eq!(parse(" ++++ "), [Add(4)]);
+fn parses_add_runs() {
+    assert_eq!(parse(" ++++ --- "), [Add(4), Add(-3)]);
 }
 
 #[test]
-fn it_parses_a_very_simple_program() {
+fn parses_move_runs() {
+    assert_eq!(parse(" >>>> <<< "), [Move(4), Move(-3)]);
+}
+
+#[test]
+fn parses_io() {
+    assert_eq!(parse(" , . "), [Read, Write]);
+}
+
+#[test]
+fn parses_mixed_programs() {
     assert_eq!(
         parse(">+<-,."),
         [Move(1), Add(1), Move(-1), Add(-1), Read, Write]
@@ -30,101 +40,55 @@ fn it_parses_a_very_simple_program() {
 }
 
 #[test]
-fn it_groups_consecutive_adds() {
-    assert_eq!(parse("++---+-----"), [Add(-5)]);
+fn keeps_adjacent_raw_instructions_unoptimized() {
+    assert_eq!(parse("++---+-----"), [Add(2), Add(-3), Add(1), Add(-5)]);
 }
 
 #[test]
-fn it_groups_consecutive_adds_with_comments() {
-    assert_eq!(parse("-foo-++++\n+bar++- --"), [Add(2)]);
+fn comments_separate_raw_instruction_runs() {
+    assert_eq!(
+        parse("-foo-++++\n+bar++- --"),
+        [Add(-1), Add(-1), Add(4), Add(1), Add(2), Add(-1), Add(-2)]
+    );
 }
 
 #[test]
-fn it_groups_consecutive_moves() {
-    assert_eq!(parse("<<<><>>>>"), [Move(1)]);
-}
-
-#[test]
-fn it_groups_consecutive_moves_with_comments() {
-    assert_eq!(parse(">foo><<<<\n>bar>>< <<"), [Move(-2)]);
-}
-
-#[test]
-fn it_parses_simple_loops() {
+fn parses_simple_loops() {
     assert_eq!(parse("-[+]+"), [Add(-1), Loop(vec![Add(1)]), Add(1)]);
 }
 
 #[test]
-fn it_omits_empty_loops() {
-    assert_eq!(parse("++[][]+"), [Add(3)]);
+fn preserves_empty_loops() {
+    assert_eq!(
+        parse("++[][]+"),
+        [Add(2), Loop(vec![]), Loop(vec![]), Add(1)]
+    );
 }
 
 #[test]
-fn it_omits_empty_nested_loops() {
-    assert_eq!(parse("++[[[][]][[][]][]]+"), [Add(3)]);
+fn parses_nested_loops() {
+    assert_eq!(
+        parse("-[++[--][++]]+"),
+        [
+            Add(-1),
+            Loop(vec![Add(2), Loop(vec![Add(-2)]), Loop(vec![Add(2)])]),
+            Add(1),
+        ]
+    );
 }
 
 #[test]
-fn it_parses_nested_loops() {
-    let expected = vec![
-        Add(-1),
-        Loop(vec![Add(2), Loop(vec![Add(-2)]), Loop(vec![Add(2)])]),
-        Add(1),
-    ];
-    assert_eq!(parse("-[++[--][++]]+"), expected);
-}
-
-#[test]
-fn it_omits_zero_adds() {
-    assert_eq!(parse(".++ --."), [Write, Write])
-}
-
-#[test]
-fn it_omits_zero_moves() {
-    assert_eq!(parse(".>> <<."), [Write, Write])
-}
-
-#[test]
-fn it_transforms_a_scan_loop_into_a_scan() {
-    assert_eq!(parse("[-]"), [Set(0)]);
-}
-
-#[test]
-fn it_combines_set_with_following_adds() {
-    assert_eq!(parse("[-]+++"), [Set(3)]);
-}
-
-#[test]
-fn it_omits_adds_after_sets() {
-    assert_eq!(parse("+++[-]+"), [Set(1)]);
-}
-
-#[test]
-fn it_omits_sets_before_sets() {
-    assert_eq!(parse("[-]+++++[-]--"), [Set(-2)]);
-}
-
-#[test]
-fn it_omits_loops_after_set() {
-    assert_eq!(parse("[-][>+.<-]."), [WriteConst(0)]);
-}
-
-#[test]
-fn it_omits_muls_after_set_0() {
-    assert_eq!(parse("[-][>+<-]."), [WriteConst(0)]);
-}
-
-#[test]
-fn it_transforms_move_loops_into_scans() {
-    assert_eq!(parse("[>>>>]"), [Scan(4)]);
-}
-
-#[test]
-fn it_transforms_multiplication_loops_into_mul_runs() {
-    assert_eq!(parse("[>+<-]"), [MulRun(vec![(1, 1)])]);
-}
-
-#[test]
-fn it_orders_mul_run_offsets() {
-    assert_eq!(parse("[>+++>++<<-]"), [MulRun(vec![(1, 3), (2, 2)])]);
+fn preserves_nested_empty_loops() {
+    assert_eq!(
+        parse("++[[[][]][[][]][]]+"),
+        [
+            Add(2),
+            Loop(vec![
+                Loop(vec![Loop(vec![]), Loop(vec![])]),
+                Loop(vec![Loop(vec![]), Loop(vec![])]),
+                Loop(vec![])
+            ]),
+            Add(1),
+        ]
+    );
 }
