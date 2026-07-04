@@ -2,7 +2,10 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static NEXT_PROGRAM_ID: AtomicU64 = AtomicU64::new(0);
 
 fn run_program(source: &str, input: &[u8]) -> Vec<u8> {
     let path = write_program(source);
@@ -42,7 +45,8 @@ fn write_program(source: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time before UNIX epoch")
         .as_nanos();
-    path.push(format!("rbf-{}-{unique}.bf", std::process::id()));
+    let id = NEXT_PROGRAM_ID.fetch_add(1, Ordering::Relaxed);
+    path.push(format!("rbf-{}-{unique}-{id}.bf", std::process::id()));
     fs::write(&path, source).expect("failed to write test program");
     path
 }
