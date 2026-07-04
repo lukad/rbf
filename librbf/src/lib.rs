@@ -12,5 +12,5 @@ mod parser;
 
 pub use ast::*;
 pub use jit::Jit;
-pub use opt::opt;
+pub use opt::optimize;
 pub use parser::parse;
