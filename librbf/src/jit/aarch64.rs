@@ -107,115 +107,150 @@ impl Jit {
     }
 
     fn generate(&mut self, program: &Program) {
+        let mut offset = 0;
+
         for ins in program.iter() {
             match ins {
-                &Move(i) => self.move_tape(i),
-                &Add(i) => {
-                    self.load_x(Reg::Scratch1, i as u8 as u64);
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                            ; add W(Reg::Scratch0), W(Reg::Scratch0), W(Reg::Scratch1)
-                            ; strb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                    );
-                }
-                Write => {
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; ldrb W(Reg::Arg0), [X(Reg::TapePtr)]
-                            ; blr X(Reg::PutCharTarget)
-                    );
-                }
-                WriteConst(i) => {
-                    self.load_x(Reg::Arg0, (i % 0xFF) as u8 as u64);
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; strb W(Reg::Arg0), [X(Reg::TapePtr)]
-                            ; blr X(Reg::PutCharTarget)
-                    );
-                }
-                WriteBytes(bytes) => {
-                    let last = *bytes.last().unwrap();
-                    self.load_x(Reg::Scratch0, last as u64);
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; strb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                    );
-
-                    self.load_x(Reg::Arg0, bytes.as_ptr() as u64);
-                    self.load_x(Reg::Arg1, bytes.len() as u64);
-
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; blr X(Reg::PutBytesTarget)
-                    );
-                }
-                Read => {
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; blr X(Reg::GetCharTarget)
-                            ; strb W(Reg::Arg0), [X(Reg::TapePtr)]
-                    );
-                }
-                Set(0) => {
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; strb wzr, [X(Reg::TapePtr)]
-                    );
-                }
-                Set(i) => {
-                    self.load_x(Reg::Scratch0, (i % 0xFF) as u8 as u64);
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; strb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                    );
-                }
-                &Mul(offset, factor) => {
-                    self.generate_mul(offset, factor);
-                }
-                MulRun(muls) => {
-                    self.generate_mul_run(muls);
-                }
-                &Scan(i) => {
-                    let move_label = self.ops.new_dynamic_label();
-                    let rest_label = self.ops.new_dynamic_label();
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                            ; cbz W(Reg::Scratch0), =>rest_label
-                            ; =>move_label
-                    );
-
-                    self.move_tape(i);
-
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                            ; cbnz W(Reg::Scratch0), =>move_label
-                            ; =>rest_label
-                    );
+                &Move(i) => offset += i,
+                &Add(n) => self.add(offset, n),
+                &Set(n) => self.set(offset, n),
+                &Mul(o, f) => self.mul(offset, offset + o, f),
+                MulRun(muls) => self.mul_run(offset, muls),
+                Write => self.write(offset),
+                Read => self.read(offset),
+                &WriteConst(n) => self.write_const(offset, n),
+                WriteBytes(bytes) => self.write_bytes(offset, bytes),
+                Scan(n) => {
+                    self.flush_offset(&mut offset);
+                    self.scan(*n);
                 }
                 Loop(body) => {
-                    let body_label = self.ops.new_dynamic_label();
-                    let rest_label = self.ops.new_dynamic_label();
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                            ; cbz W(Reg::Scratch0), =>rest_label
-                            ; =>body_label
-                    );
-
-                    self.generate(body);
-
-                    dynasm!(self.ops
-                            ; .arch aarch64
-                            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                            ; cbnz W(Reg::Scratch0), =>body_label
-                            ; =>rest_label
-                    );
+                    self.flush_offset(&mut offset);
+                    self.r#loop(body);
                 }
             }
         }
+
+        self.flush_offset(&mut offset);
+    }
+
+    /// Flushes the offset to the tape pointer and resets it to 0.
+    fn flush_offset(&mut self, offset: &mut i64) {
+        self.move_tape(*offset);
+        *offset = 0;
+    }
+
+    fn load_cell(&mut self, dst: Reg, scratch: Reg, offset: i64) {
+        debug_assert!(dst != scratch);
+
+        if let Some(offset) = direct_byte_offset(offset) {
+            dynasm!(self.ops
+                ; .arch aarch64
+                ; ldrb W(dst), [X(Reg::TapePtr), #offset]
+            );
+            return;
+        }
+
+        self.compute_offset(scratch, offset);
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; ldrb W(dst), [X(scratch)]
+        );
+    }
+
+    fn store_cell(&mut self, src: Reg, scratch: Reg, offset: i64) {
+        debug_assert!(src != scratch);
+
+        if let Some(offset) = direct_byte_offset(offset) {
+            dynasm!(self.ops
+                ; .arch aarch64
+                ; strb W(src), [X(Reg::TapePtr), #offset]
+            );
+            return;
+        }
+
+        self.compute_offset(scratch, offset);
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; strb W(src), [X(scratch)]
+        );
+    }
+
+    fn zero_cell(&mut self, scratch: Reg, offset: i64) {
+        if let Some(offset) = direct_byte_offset(offset) {
+            dynasm!(self.ops
+                ; .arch aarch64
+                ; strb wzr, [X(Reg::TapePtr), #offset]
+            );
+            return;
+        }
+
+        self.compute_offset(scratch, offset);
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; strb wzr, [X(scratch)]
+        );
+    }
+
+    fn add(&mut self, offset: i64, n: i64) {
+        self.load_x(Reg::Scratch1, n as u8 as u64);
+        self.load_cell(Reg::Scratch0, Reg::Scratch2, offset);
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; add W(Reg::Scratch0), W(Reg::Scratch0), W(Reg::Scratch1)
+        );
+        self.store_cell(Reg::Scratch0, Reg::Scratch2, offset);
+    }
+
+    fn set(&mut self, offset: i64, n: i64) {
+        if n == 0 {
+            self.zero_cell(Reg::Scratch2, offset);
+            return;
+        }
+
+        self.load_x(Reg::Scratch0, n as u8 as u64);
+        self.store_cell(Reg::Scratch0, Reg::Scratch2, offset);
+    }
+
+    fn write(&mut self, offset: i64) {
+        self.load_cell(Reg::Arg0, Reg::Scratch2, offset);
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; blr X(Reg::PutCharTarget)
+        );
+    }
+
+    fn read(&mut self, offset: i64) {
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; blr X(Reg::GetCharTarget)
+        );
+        self.store_cell(Reg::Arg0, Reg::Scratch2, offset);
+    }
+
+    fn write_const(&mut self, offset: i64, n: i64) {
+        self.load_x(Reg::Arg0, n as u8 as u64);
+        self.store_cell(Reg::Arg0, Reg::Scratch2, offset);
+
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; blr X(Reg::PutCharTarget)
+        );
+    }
+
+    fn write_bytes(&mut self, offset: i64, bytes: &[u8]) {
+        let last = *bytes.last().unwrap();
+
+        self.load_x(Reg::Scratch0, last as u64);
+        self.store_cell(Reg::Scratch0, Reg::Scratch2, offset);
+
+        self.load_x(Reg::Arg0, bytes.as_ptr() as u64);
+        self.load_x(Reg::Arg1, bytes.len() as u64);
+
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; blr X(Reg::PutBytesTarget)
+        );
     }
 
     /// Generates code for `Instruction::Mul`.
@@ -223,35 +258,38 @@ impl Jit {
     /// The general case is roughly `tape[ptr + offset] += tape[ptr] * factor`.
     /// When `factor` is 1 or -1 this is effectively just an addition or subtraction
     /// and a specialized path without multiplication is taken.
-    fn generate_mul(&mut self, offset: i64, factor: i64) {
-        let addr = Reg::Scratch2;
-        self.compute_offset(addr, offset);
+    fn mul(&mut self, source: i64, dest: i64, factor: i64) {
+        self.load_cell(Reg::MulSource, Reg::Scratch2, source);
 
         match factor {
-            1 => dynasm!(self.ops
-                ; .arch aarch64
-                ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                ; ldrb W(Reg::Scratch1), [X(addr)]
-                ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::Scratch0)
-                ; strb W(Reg::Scratch1), [X(addr)]
-            ),
-            -1 => dynasm!(self.ops
-                ; .arch aarch64
-                ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                ; ldrb W(Reg::Scratch1), [X(addr)]
-                ; sub W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::Scratch0)
-                ; strb W(Reg::Scratch1), [X(addr)]
-            ),
+            1 => {
+                self.load_cell(Reg::Scratch1, Reg::Scratch2, dest);
+                dynasm!(self.ops
+                    ; .arch aarch64
+                    ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::MulSource)
+                );
+                self.store_cell(Reg::Scratch1, Reg::Scratch2, dest);
+            }
+            -1 => {
+                self.load_cell(Reg::Scratch1, Reg::Scratch2, dest);
+                dynasm!(self.ops
+                    ; .arch aarch64
+                    ; sub W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::MulSource)
+                );
+                self.store_cell(Reg::Scratch1, Reg::Scratch2, dest);
+            }
             _ => {
                 self.load_x(Reg::Scratch1, factor as u8 as u64);
                 dynasm!(self.ops
                     ; .arch aarch64
-                    ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
-                    ; mul W(Reg::Scratch0), W(Reg::Scratch0), W(Reg::Scratch1)
-                    ; ldrb W(Reg::Scratch1), [X(addr)]
-                    ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::Scratch0)
-                    ; strb W(Reg::Scratch1), [X(addr)]
+                    ; mul W(Reg::Scratch0), W(Reg::MulSource), W(Reg::Scratch1)
                 );
+                self.load_cell(Reg::Scratch1, Reg::Scratch2, dest);
+                dynasm!(self.ops
+                    ; .arch aarch64
+                    ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::Scratch0)
+                );
+                self.store_cell(Reg::Scratch1, Reg::Scratch2, dest);
             }
         }
     }
@@ -261,47 +299,87 @@ impl Jit {
     /// Optimized multiplication loops read from one source cell, apply one or more
     /// transfers, then clear the source. This loads the source once and reuses it
     /// for every destination update.
-    fn generate_mul_run(&mut self, muls: &[(i64, i64)]) {
-        // Keep the original source cell live across all destination updates.
-        dynasm!(self.ops
-            ; .arch aarch64
-            ; ldrb W(Reg::MulSource), [X(Reg::TapePtr)]
-        );
+    fn mul_run(&mut self, base: i64, muls: &[(i64, i64)]) {
+        self.load_cell(Reg::MulSource, Reg::Scratch2, base);
 
         for &(offset, factor) in muls {
-            let addr = Reg::Scratch2;
-            self.compute_offset(addr, offset);
+            let dest = base + offset;
 
             match factor {
-                1 => dynasm!(self.ops
-                    ; .arch aarch64
-                    ; ldrb W(Reg::Scratch1), [X(addr)]
-                    ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::MulSource)
-                    ; strb W(Reg::Scratch1), [X(addr)]
-                ),
-                -1 => dynasm!(self.ops
-                    ; .arch aarch64
-                    ; ldrb W(Reg::Scratch1), [X(addr)]
-                    ; sub W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::MulSource)
-                    ; strb W(Reg::Scratch1), [X(addr)]
-                ),
+                1 => {
+                    self.load_cell(Reg::Scratch1, Reg::Scratch2, dest);
+                    dynasm!(self.ops
+                        ; .arch aarch64
+                        ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::MulSource)
+                    );
+                    self.store_cell(Reg::Scratch1, Reg::Scratch2, dest);
+                }
+                -1 => {
+                    self.load_cell(Reg::Scratch1, Reg::Scratch2, dest);
+                    dynasm!(self.ops
+                        ; .arch aarch64
+                        ; sub W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::MulSource)
+                    );
+                    self.store_cell(Reg::Scratch1, Reg::Scratch2, dest);
+                }
                 _ => {
                     self.load_x(Reg::Scratch1, factor as u8 as u64);
                     dynasm!(self.ops
                         ; .arch aarch64
                         ; mul W(Reg::Scratch0), W(Reg::MulSource), W(Reg::Scratch1)
-                        ; ldrb W(Reg::Scratch1), [X(addr)]
-                        ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::Scratch0)
-                        ; strb W(Reg::Scratch1), [X(addr)]
                     );
+                    self.load_cell(Reg::Scratch1, Reg::Scratch2, dest);
+                    dynasm!(self.ops
+                        ; .arch aarch64
+                        ; add W(Reg::Scratch1), W(Reg::Scratch1), W(Reg::Scratch0)
+                    );
+                    self.store_cell(Reg::Scratch1, Reg::Scratch2, dest);
                 }
             }
         }
 
-        // Finally clear the original source cell
+        self.zero_cell(Reg::Scratch2, base);
+    }
+
+    fn scan(&mut self, n: i64) {
+        let move_label = self.ops.new_dynamic_label();
+        let rest_label = self.ops.new_dynamic_label();
+
         dynasm!(self.ops
             ; .arch aarch64
-            ; strb wzr, [X(Reg::TapePtr)]
+            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+            ; cbz W(Reg::Scratch0), =>rest_label
+            ; =>move_label
+        );
+
+        self.move_tape(n);
+
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+            ; cbnz W(Reg::Scratch0), =>move_label
+            ; =>rest_label
+        );
+    }
+
+    fn r#loop(&mut self, body: &Program) {
+        let body_label = self.ops.new_dynamic_label();
+        let rest_label = self.ops.new_dynamic_label();
+
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+            ; cbz W(Reg::Scratch0), =>rest_label
+            ; =>body_label
+        );
+
+        self.generate(body);
+
+        dynasm!(self.ops
+            ; .arch aarch64
+            ; ldrb W(Reg::Scratch0), [X(Reg::TapePtr)]
+            ; cbnz W(Reg::Scratch0), =>body_label
+            ; =>rest_label
         );
     }
 
@@ -429,5 +507,13 @@ impl Jit {
 impl Default for Jit {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn direct_byte_offset(offset: i64) -> Option<u32> {
+    if (0..4096).contains(&offset) {
+        Some(offset as u32)
+    } else {
+        None
     }
 }
