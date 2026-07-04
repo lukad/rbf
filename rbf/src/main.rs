@@ -2,8 +2,8 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use clap::{Parser, ValueEnum};
-use librbf::{Jit, parse};
+use clap::{ArgAction, Parser, ValueEnum};
+use librbf::{Jit, opt, parse};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -25,6 +25,9 @@ struct Args {
         help = "Shows the program instead of running it"
     )]
     emit: Option<Emit>,
+
+    #[arg(long = "no-opt", action = ArgAction::SetFalse, help = "Disables optimization")]
+    opt: bool,
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -36,7 +39,8 @@ fn main() {
     let args = Args::parse();
     let file = File::open(args.program).expect("Could not read program");
 
-    let program = parse(file);
+    let parse = parse(file);
+    let program = if args.opt { opt(parse) } else { parse };
 
     if matches!(args.emit, Some(Emit::Ast)) {
         println!("{:?}", program);
