@@ -438,6 +438,14 @@ impl Jit {
             return;
         }
 
+        if let Some(offset) = direct_signed_byte_offset(offset) {
+            dynasm!(self.ops
+                ; .arch aarch64
+                ; ldurb W(dst), [X(Reg::TapePtr), #offset]
+            );
+            return;
+        }
+
         self.compute_offset(scratch, offset);
         dynasm!(self.ops
             ; .arch aarch64
@@ -452,6 +460,14 @@ impl Jit {
             dynasm!(self.ops
                 ; .arch aarch64
                 ; strb W(src), [X(Reg::TapePtr), #offset]
+            );
+            return;
+        }
+
+        if let Some(offset) = direct_signed_byte_offset(offset) {
+            dynasm!(self.ops
+                ; .arch aarch64
+                ; sturb W(src), [X(Reg::TapePtr), #offset]
             );
             return;
         }
@@ -472,6 +488,14 @@ impl Jit {
             return;
         }
 
+        if let Some(offset) = direct_signed_byte_offset(offset) {
+            dynasm!(self.ops
+                ; .arch aarch64
+                ; sturb wzr, [X(Reg::TapePtr), #offset]
+            );
+            return;
+        }
+
         self.compute_offset(scratch, offset);
         dynasm!(self.ops
             ; .arch aarch64
@@ -480,22 +504,31 @@ impl Jit {
     }
 
     fn add(&mut self, offset: i64, n: i64) {
-        self.load_x(Reg::Scratch1, n as u8 as u64);
+        let value = n as u8;
+
+        if value == 0 {
+            return;
+        }
+
+        let value = value as u32;
+
         self.load_cell(Reg::Scratch0, Reg::Scratch2, offset);
         dynasm!(self.ops
             ; .arch aarch64
-            ; add W(Reg::Scratch0), W(Reg::Scratch0), W(Reg::Scratch1)
+            ; add WSP(Reg::Scratch0), WSP(Reg::Scratch0), #value
         );
         self.store_cell(Reg::Scratch0, Reg::Scratch2, offset);
     }
 
     fn set(&mut self, offset: i64, n: i64) {
-        if n == 0 {
+        let value = n as u8;
+
+        if value == 0 {
             self.zero_cell(Reg::Scratch2, offset);
             return;
         }
 
-        self.load_x(Reg::Scratch0, n as u8 as u64);
+        self.load_x(Reg::Scratch0, value as u64);
         self.store_cell(Reg::Scratch0, Reg::Scratch2, offset);
     }
 
@@ -793,6 +826,14 @@ impl Default for Jit {
 fn direct_byte_offset(offset: i64) -> Option<u32> {
     if (0..4096).contains(&offset) {
         Some(offset as u32)
+    } else {
+        None
+    }
+}
+
+fn direct_signed_byte_offset(offset: i64) -> Option<i32> {
+    if (-256..0).contains(&offset) {
+        Some(offset as i32)
     } else {
         None
     }
