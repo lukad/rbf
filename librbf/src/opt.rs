@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{Instruction, Program, ast::Instruction::*};
 
 pub fn optimize(program: Program) -> Program {
@@ -75,25 +73,29 @@ fn optimize_loop(program: Program) -> Option<Instruction> {
 }
 
 fn optimize_mul(program: Program) -> Instruction {
-    let mut muls = HashMap::new();
+    let mut muls = Vec::new();
     let mut offset = 0;
     let mut is_mul = true;
 
     for ins in program.iter() {
         match ins {
-            Add(i) => *muls.entry(offset).or_insert(0) += i,
+            Add(i) => add_mul(&mut muls, offset, *i),
             Move(i) => offset += i,
             _ => is_mul = false,
         }
     }
 
-    if !is_mul || offset != 0 || muls.get(&0) != Some(&-1) {
+    let source = muls
+        .iter()
+        .find_map(|&(offset, factor)| (offset == 0).then_some(factor));
+
+    if !is_mul || offset != 0 || source != Some(-1) {
         return Loop(program);
     }
 
     let mut transfers: Vec<_> = muls
-        .iter()
-        .filter_map(|(&k, &v)| (k != 0).then_some((k, v)))
+        .into_iter()
+        .filter(|&(offset, _)| offset != 0)
         .collect();
     transfers.sort_by_key(|&(offset, _)| offset);
 
@@ -101,6 +103,14 @@ fn optimize_mul(program: Program) -> Instruction {
         Set(0)
     } else {
         MulRun(transfers)
+    }
+}
+
+fn add_mul(muls: &mut Vec<(i64, i64)>, offset: i64, amount: i64) {
+    if let Some((_, factor)) = muls.iter_mut().find(|(existing, _)| *existing == offset) {
+        *factor += amount;
+    } else {
+        muls.push((offset, amount));
     }
 }
 
