@@ -18,9 +18,7 @@ fn optimize_instruction(out: &mut Program, ins: Instruction) {
     match ins {
         Add(0) | Move(0) => (),
         Loop(body) => {
-            if let Some(ins) = optimize_loop(optimize_program(body)) {
-                optimize_non_loop(out, ins);
-            }
+            optimize_non_loop(out, optimize_loop(optimize_program(body)));
         }
         ins => optimize_non_loop(out, ins),
     }
@@ -62,13 +60,13 @@ fn optimize_non_loop(out: &mut Program, ins: Instruction) {
     }
 }
 
-fn optimize_loop(program: Program) -> Option<Instruction> {
+fn optimize_loop(program: Program) -> Instruction {
     match &program[..] {
-        [] => None,
-        [Add(-1)] => Some(Set(0)),
-        [Move(n)] => Some(Scan(*n)),
-        [Set(0)] => Some(Set(0)),
-        _ => Some(optimize_mul(program)),
+        [] => Loop(program),
+        [Add(-1)] => Set(0),
+        [Move(n)] => Scan(*n),
+        [Set(0)] => Set(0),
+        _ => optimize_mul(program),
     }
 }
 
