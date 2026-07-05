@@ -27,16 +27,6 @@ fn groups_consecutive_moves_with_comments() {
 }
 
 #[test]
-fn omits_empty_loops() {
-    assert_eq!(opt("++[][]+"), [Add(3)]);
-}
-
-#[test]
-fn omits_empty_nested_loops() {
-    assert_eq!(opt("++[[[][]][[][]][]]+"), [Add(3)]);
-}
-
-#[test]
 fn preserves_non_optimizable_nested_loops() {
     let expected = vec![
         Add(-1),
@@ -44,6 +34,21 @@ fn preserves_non_optimizable_nested_loops() {
         Add(1),
     ];
     assert_eq!(opt("-[++[--][++]]+"), expected);
+}
+
+#[test]
+fn preserves_empty_loops() {
+    assert_eq!(opt("++[][]+"), [Add(2), Loop(vec![]), Loop(vec![]), Add(1)]);
+}
+
+#[test]
+fn preserves_loops_that_optimize_to_empty_loops() {
+    assert_eq!(opt("[+-]"), [Loop(vec![])]);
+}
+
+#[test]
+fn omits_loops_after_set_0() {
+    assert_eq!(opt("[-][]+"), [Set(1)]);
 }
 
 #[test]
