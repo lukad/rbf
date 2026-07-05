@@ -68,6 +68,11 @@ fn reads_input() {
 }
 
 #[test]
+fn prints_bulk_constant_output() {
+    assert_eq!(run_program("[-].[-]+.", b""), b"\0\x01");
+}
+
+#[test]
 fn runs_optimized_multiply_loop() {
     assert_eq!(run_program("+++++[>+++++++++++++<-]>.", b""), b"A");
 }

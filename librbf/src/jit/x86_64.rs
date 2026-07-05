@@ -10,6 +10,7 @@ pub struct Jit {
     tape_size: usize,
     ops: dynasmrt::x64::Assembler,
     start: dynasmrt::AssemblyOffset,
+    literals: Vec<Box<[u8]>>,
 }
 
 impl Jit {
@@ -21,6 +22,7 @@ impl Jit {
             tape_size: 30_000,
             start: ops.offset(),
             ops,
+            literals: Vec::new(),
         }
     }
 
@@ -65,7 +67,7 @@ impl Jit {
         );
 
         let buf = self.ops.finalize().unwrap();
-        Function::new(buf, self.start)
+        Function::new(buf, self.start, self.literals)
     }
 
     fn generate(&mut self, program: &Program) {
@@ -112,12 +114,13 @@ impl Jit {
                 }
                 WriteBytes(bytes) => {
                     let last = *bytes.last().unwrap();
+                    let (ptr, len) = self.retain_bytes(bytes);
 
                     dynasm!(self.ops
                             ; .arch x64
                             ; mov BYTE [rbx], last as _
-                            ; mov rdi, QWORD bytes.as_ptr() as _
-                            ; mov rsi, bytes.len() as _
+                            ; mov rdi, QWORD ptr as _
+                            ; mov rsi, len as _
                             ; mov rax, QWORD putbytes as *const () as _
                             ; call rax
                     );
@@ -186,6 +189,14 @@ impl Jit {
                 }
             }
         }
+    }
+
+    fn retain_bytes(&mut self, bytes: &[u8]) -> (*const u8, usize) {
+        let bytes = bytes.to_vec().into_boxed_slice();
+        let ptr = bytes.as_ptr();
+        let len = bytes.len();
+        self.literals.push(bytes);
+        (ptr, len)
     }
 }
 

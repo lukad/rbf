@@ -29,15 +29,32 @@ pub(crate) extern "C" fn memzero(dst: *mut u8, count: usize) {
 pub struct Function {
     buf: ExecutableBuffer,
     start: AssemblyOffset,
+    // Keeps byte literals alive when generated code stores their raw pointers.
+    _literals: Vec<Box<[u8]>>,
 }
 
 impl Function {
-    pub(super) fn new(buf: ExecutableBuffer, start: AssemblyOffset) -> Self {
-        Self { buf, start }
+    pub(super) fn new(
+        buf: ExecutableBuffer,
+        start: AssemblyOffset,
+        literals: Vec<Box<[u8]>>,
+    ) -> Self {
+        Self {
+            buf,
+            start,
+            _literals: literals,
+        }
     }
 
     pub fn run(&self) {
         let fun: extern "C" fn() = unsafe { mem::transmute(self.buf.ptr(self.start)) };
         (fun)();
+    }
+}
+
+#[cfg(test)]
+impl Function {
+    pub(crate) fn literal_count(&self) -> usize {
+        self._literals.len()
     }
 }

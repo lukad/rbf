@@ -158,6 +158,7 @@ pub struct Jit {
     tape_size: usize,
     ops: dynasmrt::aarch64::Assembler,
     start: dynasmrt::AssemblyOffset,
+    literals: Vec<Box<[u8]>>,
 }
 
 impl Jit {
@@ -169,6 +170,7 @@ impl Jit {
             tape_size: 30_000,
             start: ops.offset(),
             ops,
+            literals: Vec::new(),
         }
     }
 
@@ -224,7 +226,7 @@ impl Jit {
         );
 
         let buf = self.ops.finalize().unwrap();
-        Function::new(buf, self.start)
+        Function::new(buf, self.start, self.literals)
     }
 
     fn generate(&mut self, program: &Program) {
@@ -557,13 +559,23 @@ impl Jit {
     }
 
     fn write_bytes(&mut self, bytes: &[u8]) {
-        self.load_x(Reg::Arg0, bytes.as_ptr() as u64);
-        self.load_x(Reg::Arg1, bytes.len() as u64);
+        let (ptr, len) = self.retain_bytes(bytes);
+
+        self.load_x(Reg::Arg0, ptr as u64);
+        self.load_x(Reg::Arg1, len as u64);
 
         dynasm!(self.ops
             ; .arch aarch64
             ; blr X(Reg::PutBytesTarget)
         );
+    }
+
+    fn retain_bytes(&mut self, bytes: &[u8]) -> (*const u8, usize) {
+        let bytes = bytes.to_vec().into_boxed_slice();
+        let ptr = bytes.as_ptr();
+        let len = bytes.len();
+        self.literals.push(bytes);
+        (ptr, len)
     }
 
     /// Generates code for `Instruction::Mul`.
