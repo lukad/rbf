@@ -1,5 +1,5 @@
 use super::Function;
-use super::common::{getchar, memzero, putchar};
+use super::common::{getchar, memzero, putbytes, putchar};
 use crate::ast::{Instruction::*, Program};
 use dynasm::dynasm;
 use dynasmrt::{DynasmApi, DynasmLabelApi};
@@ -32,12 +32,15 @@ impl Jit {
 
     /// Generates machine code for the given program
     pub fn compile(mut self, program: &Program) -> Function {
+        let frame_size = self.tape_size + 8;
+
         // Prologue
         dynasm!(self.ops
                 ; .arch x64
                 ; push rbp // Store frame pointer
                 ; mov rbp, rsp // Address of current stack frame
-                ; sub rsp, self.tape_size as _ // Reserve memory for tape on the stack
+                ; push rbx // Preserve callee-saved tape pointer register
+                ; sub rsp, frame_size as _ // Reserve memory for tape and keep stack aligned
                 ; lea rbx, [rsp] // Save memory address in rbx
         );
 
@@ -55,7 +58,9 @@ impl Jit {
         // Epilogue
         dynasm!(self.ops
                 ; .arch x64
-                ; leave // Restore frame pointer
+                ; add rsp, frame_size as _
+                ; pop rbx // Restore callee-saved tape pointer register
+                ; pop rbp // Restore frame pointer
                 ; ret
         );
 
@@ -94,6 +99,29 @@ impl Jit {
                             ; mov [rbx], al
                     );
                 }
+                &WriteConst(i) => {
+                    let value = i as u8;
+
+                    dynasm!(self.ops
+                            ; .arch x64
+                            ; mov BYTE [rbx], value as _
+                            ; mov rdi, value as _
+                            ; mov rax, QWORD putchar as *const () as _
+                            ; call rax
+                    );
+                }
+                WriteBytes(bytes) => {
+                    let last = *bytes.last().unwrap();
+
+                    dynasm!(self.ops
+                            ; .arch x64
+                            ; mov BYTE [rbx], last as _
+                            ; mov rdi, QWORD bytes.as_ptr() as _
+                            ; mov rsi, bytes.len() as _
+                            ; mov rax, QWORD putbytes as *const () as _
+                            ; call rax
+                    );
+                }
                 Set(i) => {
                     dynasm!(self.ops
                             ; .arch x64
@@ -106,6 +134,21 @@ impl Jit {
                             ; mov al, mul as _
                             ; mul BYTE [rbx]
                             ; add [rbx + offset as _], al
+                    );
+                }
+                MulRun(muls) => {
+                    for &(offset, mul) in muls {
+                        dynasm!(self.ops
+                                ; .arch x64
+                                ; mov al, mul as _
+                                ; mul BYTE [rbx]
+                                ; add [rbx + offset as _], al
+                        );
+                    }
+
+                    dynasm!(self.ops
+                            ; .arch x64
+                            ; mov BYTE [rbx], 0
                     );
                 }
                 &Scan(i) => {
