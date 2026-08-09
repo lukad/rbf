@@ -113,5 +113,5 @@ fn add_mul(muls: &mut Vec<(i64, i64)>, offset: i64, amount: i64) {
 }
 
 fn byte(i: i64) -> u8 {
-    (i % 0xFF) as u8
+    i as u8
 }

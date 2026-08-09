@@ -73,6 +73,16 @@ fn prints_bulk_constant_output() {
 }
 
 #[test]
+fn wraps_cells_at_256() {
+    assert_eq!(run_program(&format!("[-]{}.", "+".repeat(255)), b""), [255]);
+}
+
+#[test]
 fn runs_optimized_multiply_loop() {
     assert_eq!(run_program("+++++[>+++++++++++++<-]>.", b""), b"A");
+}
+
+#[test]
+fn runs_input_dependent_multiply_loop() {
+    assert_eq!(run_program(",[>+>->++<<<-]>.>.>.", &[5]), [5, 251, 10]);
 }

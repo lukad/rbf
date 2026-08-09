@@ -1,6 +1,7 @@
 use super::Function;
 use super::common::{getchar, memzero, putbytes, putchar};
-use crate::ast::{Instruction::*, Program};
+use super::lower::{self, Emitter};
+use crate::ast::Program;
 use dynasm::dynasm;
 use dynasmrt::{DynasmApi, DynasmLabelApi};
 
@@ -55,7 +56,7 @@ impl Jit {
                 ; call rax
         );
 
-        self.generate(program);
+        lower::generate(&mut self, program);
 
         // Epilogue
         dynasm!(self.ops
@@ -70,125 +71,261 @@ impl Jit {
         Function::new(buf, self.start, self.literals)
     }
 
-    fn generate(&mut self, program: &Program) {
-        for ins in program.iter() {
-            match ins {
-                &Move(i) => {
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; add rbx, i as _
-                    );
-                }
-                &Add(i) => {
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; add BYTE [rbx], i as _
-                    );
-                }
-                Write => {
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; movzx rdi, [rbx]
-                            ; mov rax, QWORD putchar as *const () as _
-                            ; call rax
-                    );
-                }
-                Read => {
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; mov rax, QWORD getchar as *const () as _
-                            ; call rax
-                            ; mov [rbx], al
-                    );
-                }
-                &WriteConst(i) => {
-                    let value = i as u8;
+    fn move_tape(&mut self, offset: i64) {
+        if offset == 0 {
+            return;
+        }
 
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; mov BYTE [rbx], value as _
-                            ; mov rdi, value as _
-                            ; mov rax, QWORD putchar as *const () as _
-                            ; call rax
-                    );
-                }
-                WriteBytes(bytes) => {
-                    let last = *bytes.last().unwrap();
-                    let (ptr, len) = self.retain_bytes(bytes);
+        if let Ok(offset) = i32::try_from(offset) {
+            dynasm!(self.ops
+                ; .arch x64
+                ; add rbx, offset as _
+            );
+        } else {
+            dynasm!(self.ops
+                ; .arch x64
+                ; mov rax, QWORD offset as _
+                ; add rbx, rax
+            );
+        }
+    }
 
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; mov BYTE [rbx], last as _
-                            ; mov rdi, QWORD ptr as _
-                            ; mov rsi, len as _
-                            ; mov rax, QWORD putbytes as *const () as _
-                            ; call rax
-                    );
-                }
-                Set(i) => {
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; mov BYTE [rbx], (i % 0xFF) as _
-                    );
-                }
-                &Mul(offset, mul) => {
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; mov al, mul as _
-                            ; mul BYTE [rbx]
-                            ; add [rbx + offset as _], al
-                    );
-                }
-                MulRun(muls) => {
-                    for &(offset, mul) in muls {
-                        dynasm!(self.ops
-                                ; .arch x64
-                                ; mov al, mul as _
-                                ; mul BYTE [rbx]
-                                ; add [rbx + offset as _], al
-                        );
-                    }
+    fn compute_offset(&mut self, offset: i64) {
+        dynasm!(self.ops
+            ; .arch x64
+            ; mov r10, QWORD offset as _
+            ; add r10, rbx
+        );
+    }
 
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; mov BYTE [rbx], 0
-                    );
-                }
-                &Scan(i) => {
-                    let move_label = self.ops.new_dynamic_label();
-                    let rest_label = self.ops.new_dynamic_label();
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; cmp BYTE [rbx], 0
-                            ; je =>rest_label
-                            ; =>move_label
-                            ; add rbx, i as _
-                            ; cmp BYTE [rbx], 0
-                            ; jne =>move_label
-                            ; =>rest_label
-                    );
-                }
-                Loop(body) => {
-                    let body_label = self.ops.new_dynamic_label();
-                    let rest_label = self.ops.new_dynamic_label();
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; cmp BYTE [rbx], 0
-                            ; je =>rest_label
-                            ; =>body_label
-                    );
+    fn add(&mut self, offset: i64, value: u8) {
+        if value == 0 {
+            return;
+        }
 
-                    self.generate(body);
+        let value = value as i8;
+        if let Some(offset) = direct_offset(offset) {
+            dynasm!(self.ops
+                ; .arch x64
+                ; add BYTE [rbx + offset as _], value as _
+            );
+        } else {
+            self.compute_offset(offset);
+            dynasm!(self.ops
+                ; .arch x64
+                ; add BYTE [r10], value as _
+            );
+        }
+    }
 
-                    dynasm!(self.ops
-                            ; .arch x64
-                            ; cmp BYTE [rbx], 0
-                            ; jne =>body_label
-                            ; =>rest_label
-                    );
-                }
+    fn set(&mut self, offset: i64, value: u8) {
+        let value = value as i8;
+        if let Some(offset) = direct_offset(offset) {
+            dynasm!(self.ops
+                ; .arch x64
+                ; mov BYTE [rbx + offset as _], value as _
+            );
+        } else {
+            self.compute_offset(offset);
+            dynasm!(self.ops
+                ; .arch x64
+                ; mov BYTE [r10], value as _
+            );
+        }
+    }
+
+    fn write(&mut self, offset: i64) {
+        if let Some(offset) = direct_offset(offset) {
+            dynasm!(self.ops
+                ; .arch x64
+                ; movzx rdi, BYTE [rbx + offset as _]
+            );
+        } else {
+            self.compute_offset(offset);
+            dynasm!(self.ops
+                ; .arch x64
+                ; movzx rdi, BYTE [r10]
+            );
+        }
+
+        dynasm!(self.ops
+            ; .arch x64
+            ; mov rax, QWORD putchar as *const () as _
+            ; call rax
+        );
+    }
+
+    fn read(&mut self, offset: i64) {
+        dynasm!(self.ops
+            ; .arch x64
+            ; mov rax, QWORD getchar as *const () as _
+            ; call rax
+        );
+
+        if let Some(offset) = direct_offset(offset) {
+            dynasm!(self.ops
+                ; .arch x64
+                ; mov BYTE [rbx + offset as _], al
+            );
+        } else {
+            self.compute_offset(offset);
+            dynasm!(self.ops
+                ; .arch x64
+                ; mov BYTE [r10], al
+            );
+        }
+    }
+
+    fn write_byte(&mut self, byte: u8) {
+        dynasm!(self.ops
+            ; .arch x64
+            ; mov rdi, byte as _
+            ; mov rax, QWORD putchar as *const () as _
+            ; call rax
+        );
+    }
+
+    fn write_bytes(&mut self, bytes: &[u8]) {
+        let (ptr, len) = self.retain_bytes(bytes);
+
+        dynasm!(self.ops
+            ; .arch x64
+            ; mov rdi, QWORD ptr as _
+            ; mov rsi, len as _
+            ; mov rax, QWORD putbytes as *const () as _
+            ; call rax
+        );
+    }
+
+    fn load_source(&mut self, offset: i64) {
+        if let Some(offset) = direct_offset(offset) {
+            dynasm!(self.ops
+                ; .arch x64
+                ; movzx ecx, BYTE [rbx + offset as _]
+            );
+        } else {
+            self.compute_offset(offset);
+            dynasm!(self.ops
+                ; .arch x64
+                ; movzx ecx, BYTE [r10]
+            );
+        }
+    }
+
+    fn add_source(&mut self, offset: i64, subtract: bool) {
+        if let Some(offset) = direct_offset(offset) {
+            if subtract {
+                dynasm!(self.ops
+                    ; .arch x64
+                    ; sub BYTE [rbx + offset as _], cl
+                );
+            } else {
+                dynasm!(self.ops
+                    ; .arch x64
+                    ; add BYTE [rbx + offset as _], cl
+                );
+            }
+        } else {
+            self.compute_offset(offset);
+            if subtract {
+                dynasm!(self.ops
+                    ; .arch x64
+                    ; sub BYTE [r10], cl
+                );
+            } else {
+                dynasm!(self.ops
+                    ; .arch x64
+                    ; add BYTE [r10], cl
+                );
             }
         }
+    }
+
+    fn add_product(&mut self, offset: i64) {
+        if let Some(offset) = direct_offset(offset) {
+            dynasm!(self.ops
+                ; .arch x64
+                ; add BYTE [rbx + offset as _], al
+            );
+        } else {
+            self.compute_offset(offset);
+            dynasm!(self.ops
+                ; .arch x64
+                ; add BYTE [r10], al
+            );
+        }
+    }
+
+    fn apply_mul(&mut self, dest: i64, factor: i64) {
+        match factor as u8 {
+            0 => (),
+            1 => self.add_source(dest, false),
+            u8::MAX => self.add_source(dest, true),
+            factor => {
+                dynasm!(self.ops
+                    ; .arch x64
+                    ; imul eax, ecx, factor as _
+                );
+                self.add_product(dest);
+            }
+        }
+    }
+
+    fn mul(&mut self, source: i64, dest: i64, factor: i64) {
+        self.load_source(source);
+        self.apply_mul(dest, factor);
+    }
+
+    fn mul_run(&mut self, base: i64, muls: &[(i64, i64)]) {
+        self.load_source(base);
+
+        for &(offset, factor) in muls {
+            self.apply_mul(base + offset, factor);
+        }
+
+        self.set(base, 0);
+    }
+
+    fn scan(&mut self, step: i64) {
+        let move_label = self.ops.new_dynamic_label();
+        let rest_label = self.ops.new_dynamic_label();
+
+        dynasm!(self.ops
+            ; .arch x64
+            ; cmp BYTE [rbx], 0
+            ; je =>rest_label
+            ; =>move_label
+        );
+
+        self.move_tape(step);
+
+        dynasm!(self.ops
+            ; .arch x64
+            ; cmp BYTE [rbx], 0
+            ; jne =>move_label
+            ; =>rest_label
+        );
+    }
+
+    fn r#loop(&mut self, body: &Program) {
+        let body_label = self.ops.new_dynamic_label();
+        let rest_label = self.ops.new_dynamic_label();
+
+        dynasm!(self.ops
+            ; .arch x64
+            ; cmp BYTE [rbx], 0
+            ; je =>rest_label
+            ; =>body_label
+        );
+
+        lower::generate_without_facts(self, body);
+
+        dynasm!(self.ops
+            ; .arch x64
+            ; cmp BYTE [rbx], 0
+            ; jne =>body_label
+            ; =>rest_label
+        );
     }
 
     fn retain_bytes(&mut self, bytes: &[u8]) -> (*const u8, usize) {
@@ -200,8 +337,58 @@ impl Jit {
     }
 }
 
+impl Emitter for Jit {
+    fn move_tape(&mut self, offset: i64) {
+        Jit::move_tape(self, offset);
+    }
+
+    fn add(&mut self, offset: i64, value: u8) {
+        Jit::add(self, offset, value);
+    }
+
+    fn set(&mut self, offset: i64, value: u8) {
+        Jit::set(self, offset, value);
+    }
+
+    fn mul(&mut self, source: i64, dest: i64, factor: i64) {
+        Jit::mul(self, source, dest, factor);
+    }
+
+    fn mul_run(&mut self, base: i64, muls: &[(i64, i64)]) {
+        Jit::mul_run(self, base, muls);
+    }
+
+    fn write(&mut self, offset: i64) {
+        Jit::write(self, offset);
+    }
+
+    fn read(&mut self, offset: i64) {
+        Jit::read(self, offset);
+    }
+
+    fn write_byte(&mut self, byte: u8) {
+        Jit::write_byte(self, byte);
+    }
+
+    fn write_bytes(&mut self, bytes: &[u8]) {
+        Jit::write_bytes(self, bytes);
+    }
+
+    fn scan(&mut self, step: i64) {
+        Jit::scan(self, step);
+    }
+
+    fn r#loop(&mut self, body: &Program) {
+        Jit::r#loop(self, body);
+    }
+}
+
 impl Default for Jit {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn direct_offset(offset: i64) -> Option<i32> {
+    i32::try_from(offset).ok()
 }

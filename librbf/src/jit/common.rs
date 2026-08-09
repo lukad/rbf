@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::mem;
 
 pub(crate) extern "C" fn putchar(c: u8) {
-    print!("{}", c as char);
+    io::stdout().write_all(&[c]).unwrap();
 }
 
 pub(crate) extern "C" fn putbytes(buf: *const u8, count: u64) {
@@ -56,5 +56,9 @@ impl Function {
 impl Function {
     pub(crate) fn literal_count(&self) -> usize {
         self._literals.len()
+    }
+
+    pub(crate) fn code_size(&self) -> usize {
+        self.buf.len()
     }
 }

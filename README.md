@@ -86,20 +86,19 @@ optimizer simplifies the resulting instruction stream recursively:
 * Adjacent constant writes are combined into `WriteBytes`:
   `[-].[-]+.` becomes `WriteBytes(vec![0, 1])`
 
-### AArch64 code generation
+### Code generation
 
-The AArch64 backend applies a few additional optimizations while lowering the
+Both JIT backends (aarch64, x86_64) apply a few additional optimizations while lowering the
 optimized IR to machine code:
 
 * Pointer moves are kept as a virtual offset and only flushed to the tape
   pointer before operations that need the real pointer, such as loops, scans,
   and the end of the program
-* Loads, stores, and zero stores use direct AArch64 byte addressing when the
-  virtual offset fits the instruction encoding, larger offsets compute a
-  temporary address first
-* Small pointer flushes use immediate `add`/`sub`, larger pointer moves load
-  the amount into a scratch register
-* The backend tracks known cell values across straight-line code. Known-value
+* Loads, stores, and zero stores use each architecture's direct byte addressing
+  when the virtual offset fits, and compute a temporary address otherwise
+* Pointer flushes use immediate arithmetic when the offset fits and a scratch
+  register otherwise
+* The backends track known cell values across straight-line code. Known-value
   `Add`, `Mul`, and `MulRun` operations are folded during code generation,
   while redundant `Set` instructions are skipped
 * Writes from known cells are emitted as constant-byte writes and `WriteBytes`
@@ -107,5 +106,5 @@ optimized IR to machine code:
 * `Scan` and `Loop` instructions are skipped when the current cell is already
   known to be zero
 * `MulRun` loads the source cell once, reuses it for every transfer, and clears
-  the source cell at the end. Factors of `1` and `-1` use add/sub paths without
-  multiplication
+  the source cell at the end. Factors equivalent to `1` and `-1` use add/sub
+  paths without multiplication
