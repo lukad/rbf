@@ -376,7 +376,7 @@ impl Jit {
             ; =>body_label
         );
 
-        lower::generate_without_facts(self, body);
+        lower::generate_loop(self, body);
 
         dynasm!(self.ops
             ; .arch aarch64

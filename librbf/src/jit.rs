@@ -21,7 +21,7 @@ compile_error!("rbf JIT supports only x86_64 and Unix AArch64 targets");
 #[cfg(test)]
 mod tests {
     use super::Jit;
-    use crate::Instruction::{Move, WriteBytes};
+    use crate::Instruction::{Loop, Move, Read, Set, WriteBytes};
 
     #[test]
     fn compiled_function_owns_bulk_write_literals() {
@@ -39,5 +39,13 @@ mod tests {
         let moves = Jit::new().compile(&vec![Move(1), Move(-1)]);
 
         assert_eq!(moves.code_size(), empty.code_size());
+    }
+
+    #[test]
+    fn codegen_folds_redundant_sets_inside_loops() {
+        let one_set = Jit::new().compile(&vec![Read, Loop(vec![Set(1)])]);
+        let repeated_set = Jit::new().compile(&vec![Read, Loop(vec![Set(1), Set(1)])]);
+
+        assert_eq!(repeated_set.code_size(), one_set.code_size());
     }
 }

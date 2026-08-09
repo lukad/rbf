@@ -30,9 +30,9 @@ struct CellFacts {
 }
 
 impl CellFacts {
-    fn new() -> Self {
+    fn new(default_zero: bool) -> Self {
         Self {
-            default_zero: true,
+            default_zero,
             base: 0,
             cells: Vec::new(),
         }
@@ -131,8 +131,16 @@ impl CellFacts {
 }
 
 pub(super) fn generate(emitter: &mut impl Emitter, program: &Program) {
+    generate_with_facts(emitter, program, true);
+}
+
+pub(super) fn generate_loop(emitter: &mut impl Emitter, program: &Program) {
+    generate_with_facts(emitter, program, false);
+}
+
+fn generate_with_facts(emitter: &mut impl Emitter, program: &Program, default_zero: bool) {
     let mut offset = 0;
-    let mut facts = CellFacts::new();
+    let mut facts = CellFacts::new(default_zero);
 
     for ins in program {
         match ins {
@@ -273,48 +281,8 @@ pub(super) fn generate(emitter: &mut impl Emitter, program: &Program) {
     flush(emitter, &mut offset, &mut facts);
 }
 
-pub(super) fn generate_without_facts(emitter: &mut impl Emitter, program: &Program) {
-    let mut offset = 0;
-
-    for ins in program {
-        match ins {
-            &Move(i) => offset += i,
-            &Add(n) => emitter.add(offset, n as u8),
-            &Set(n) => emitter.set(offset, n as u8),
-            &Mul(relative, factor) => emitter.mul(offset, offset + relative, factor),
-            MulRun(muls) => emitter.mul_run(offset, muls),
-            Write => emitter.write(offset),
-            Read => emitter.read(offset),
-            &WriteConst(n) => {
-                let value = n as u8;
-                emitter.set(offset, value);
-                emitter.write_byte(value);
-            }
-            WriteBytes(bytes) => {
-                emitter.set(offset, *bytes.last().unwrap());
-                emitter.write_bytes(bytes);
-            }
-            &Scan(step) => {
-                flush_without_facts(emitter, &mut offset);
-                emitter.scan(step);
-            }
-            Loop(body) => {
-                flush_without_facts(emitter, &mut offset);
-                emitter.r#loop(body);
-            }
-        }
-    }
-
-    flush_without_facts(emitter, &mut offset);
-}
-
 fn flush(emitter: &mut impl Emitter, offset: &mut i64, facts: &mut CellFacts) {
     emitter.move_tape(*offset);
     facts.rebase(*offset);
-    *offset = 0;
-}
-
-fn flush_without_facts(emitter: &mut impl Emitter, offset: &mut i64) {
-    emitter.move_tape(*offset);
     *offset = 0;
 }
