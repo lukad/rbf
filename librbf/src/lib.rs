@@ -1,8 +1,5 @@
 extern crate dynasm;
 extern crate dynasmrt;
-
-#[macro_use]
-extern crate combine;
 extern crate libc;
 
 mod ast;

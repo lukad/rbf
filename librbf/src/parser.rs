@@ -2,50 +2,55 @@ use std::io::Read;
 
 use crate::ast::{Instruction::*, *};
 
-use combine::{
-    Parser, Stream, between,
-    byte::byte,
-    choice, eof, many, many1, satisfy, skip_many,
-    stream::{ReadStream, buffered::BufferedStream, state::State},
-};
-
-parser! {
-    #[inline(always)]
-    fn program[I]()(I) -> Program
-        where [I: Stream<Item=u8>]
-    {
-        let comments = || skip_many(satisfy(|c| !"+-><,.[]".bytes().any(|t| t == c)));
-        let chars = |c| many1::<Vec<_>, _>(byte(c));
-
-        let add = chars(b'+').map(|s: _| Add(s.len() as i64));
-        let sub = chars(b'-').map(|s: _| Add(-(s.len() as i64)));
-        let left = chars(b'<').map(|s: _| Move(-(s.len() as i64)));
-        let right = chars(b'>').map(|s: _| Move(s.len() as i64));
-        let read = byte(b',').map(|_| Read);
-        let write = byte(b'.').map(|_| Write);
-
-        let bfloop = between(byte(b'['), byte(b']'), program()).map(Loop);
-
-        let instruction = choice((
-            add,
-            sub,
-            left,
-            right,
-            read,
-            write,
-            bfloop
-        )).skip(comments());
-
-        (
-            comments(),
-            many(instruction)
-        ).map(|(_comments, instructions)| instructions)
-    }
-}
-
 /// Parses Brainfuck source and returns a [Program](type.Program.html).
-pub fn parse<R: Read>(input: R) -> Program {
-    let stream = BufferedStream::new(State::new(ReadStream::new(input)), 1);
-    let ((prog, _eof), _state) = (program(), eof()).parse(stream).unwrap();
-    prog
+pub fn parse<R: Read>(mut input: R) -> Program {
+    let mut source = Vec::new();
+    input.read_to_end(&mut source).unwrap();
+
+    let mut programs = vec![Program::new()];
+    let mut position = 0;
+
+    while position < source.len() {
+        let op = source[position];
+
+        match op {
+            b'+' | b'-' | b'<' | b'>' => {
+                let start = position;
+                while source.get(position) == Some(&op) {
+                    position += 1;
+                }
+
+                let count = (position - start) as i64;
+                programs.last_mut().unwrap().push(match op {
+                    b'+' => Add(count),
+                    b'-' => Add(-count),
+                    b'>' => Move(count),
+                    b'<' => Move(-count),
+                    _ => unreachable!(),
+                });
+            }
+            b',' => {
+                programs.last_mut().unwrap().push(Read);
+                position += 1;
+            }
+            b'.' => {
+                programs.last_mut().unwrap().push(Write);
+                position += 1;
+            }
+            b'[' => {
+                programs.push(Program::new());
+                position += 1;
+            }
+            b']' => {
+                assert!(programs.len() > 1, "unmatched closing bracket");
+                let body = programs.pop().unwrap();
+                programs.last_mut().unwrap().push(Loop(body));
+                position += 1;
+            }
+            _ => position += 1,
+        }
+    }
+
+    assert_eq!(programs.len(), 1, "unmatched opening bracket");
+    programs.pop().unwrap()
 }
