@@ -8,6 +8,6 @@ mod opt;
 mod parser;
 
 pub use ast::*;
-pub use jit::Jit;
+pub use jit::{Function, Jit, Symbol};
 pub use opt::optimize;
 pub use parser::parse;

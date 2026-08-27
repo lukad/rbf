@@ -86,3 +86,106 @@ fn runs_optimized_multiply_loop() {
 fn runs_input_dependent_multiply_loop() {
     assert_eq!(run_program(",[>+>->++<<<-]>.>.>.", &[5]), [5, 251, 10]);
 }
+
+fn emit(source: &str, mode: &str) -> String {
+    let path = write_program(source);
+    let output = Command::new(env!("CARGO_BIN_EXE_rbf"))
+        .arg("-e")
+        .arg(mode)
+        .arg(&path)
+        .output()
+        .expect("failed to run rbf");
+    let _ = fs::remove_file(&path);
+
+    assert!(
+        output.status.success(),
+        "rbf failed with status {:?}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8(output.stdout).expect("emitted output is not utf-8")
+}
+
+#[test]
+fn emits_disassembly() {
+    let disassembly = emit("+++++[>+++++++++++++<-]>.", "asm");
+    let (listing, summary) = disassembly
+        .rsplit_once("\n\n")
+        .expect("disassembly has no summary");
+    let lines: Vec<&str> = listing.lines().collect();
+
+    assert!(!lines.is_empty(), "disassembly is empty");
+    assert!(
+        !listing.contains("(bad"),
+        "disassembly contains undecodable bytes:\n{disassembly}"
+    );
+
+    let mut next_offset = 0;
+    for line in &lines {
+        let mut columns = line.split_whitespace();
+        let offset = columns.next().expect("missing offset");
+        let bytes = columns.next().expect("missing bytes");
+        let mnemonic = columns.next().expect("missing mnemonic");
+
+        assert!(
+            offset.len() >= 4 && offset.chars().all(|c| c.is_ascii_hexdigit()),
+            "bad offset in {line:?}"
+        );
+        assert!(
+            !bytes.is_empty()
+                && bytes.len().is_multiple_of(2)
+                && bytes.chars().all(|c| c.is_ascii_hexdigit()),
+            "bad bytes in {line:?}"
+        );
+        assert!(!mnemonic.is_empty(), "missing mnemonic in {line:?}");
+
+        assert_eq!(
+            usize::from_str_radix(offset, 16).expect("offset is not hexadecimal"),
+            next_offset,
+            "offset does not follow the previous instruction in {line:?}"
+        );
+        next_offset += bytes.len() / 2;
+    }
+
+    let epilogue = lines.last().expect("disassembly is empty");
+    assert!(
+        epilogue
+            .split_whitespace()
+            .nth(2)
+            .is_some_and(|mnemonic| mnemonic.starts_with("ret")),
+        "disassembly does not end in a return: {epilogue:?}"
+    );
+
+    assert_eq!(
+        summary.trim_end(),
+        format!("; {} instructions, {next_offset} bytes", lines.len())
+    );
+}
+
+#[test]
+fn annotates_helpers_and_literals() {
+    let disassembly = emit(",.[-].[-]+.", "asm");
+
+    for helper in ["memzero", "getchar", "putchar", "putbytes"] {
+        assert!(
+            disassembly.contains(&format!("; {helper}")),
+            "disassembly does not name {helper}:\n{disassembly}"
+        );
+    }
+
+    assert!(
+        disassembly.contains(r#"; "\x00\x01""#),
+        "disassembly does not show the written bytes:\n{disassembly}"
+    );
+}
+
+#[test]
+fn disassembly_does_not_run_the_program() {
+    let disassembly = emit(&format!("[-]{}.", "+".repeat(b'Z' as usize)), "asm");
+
+    assert!(
+        !disassembly.contains('Z'),
+        "program ran while emitting its machine code:\n{disassembly}"
+    );
+}

@@ -32,6 +32,47 @@ $ cd rbf
 $ cargo install
 ```
 
+## Usage
+
+``` bash
+$ rbf program.bf
+```
+
+Instead of running a program, `rbf` can show what it compiled. `-e ast` prints
+the intermediate representation and `-e asm` disassembles the machine code the
+JIT generated for it:
+
+``` bash
+$ echo '++++++++[>++++++++<-]>.' > program.bf
+$ rbf -e asm program.bf
+0000  55                    push rbp
+0001  4889e5                mov rbp, rsp
+0004  53                    push rbx
+0005  4881ec38750000        sub rsp, 0x7538
+000c  488d1c24              lea rbx, qword [rsp]
+0010  48b870590ece6e550000  mov rax, 0x556ece0e5970  ; memzero
+001a  4889df                mov rdi, rbx
+001d  48c7c630750000        mov rsi, 0x7530
+0024  ffd0                  call rax
+0026  c6830000000008        mov byte [rbx], 0x8
+002d  c6830100000040        mov byte [rbx + 0x1], 0x40
+0034  c6830000000000        mov byte [rbx], 0x0
+003b  48c7c740000000        mov rdi, 0x40
+0042  48b8e0590ece6e550000  mov rax, 0x556ece0e59e0  ; putchar
+004c  ffd0                  call rax
+004e  4881c301000000        add rbx, 0x1
+0055  4881c438750000        add rsp, 0x7538
+005c  5b                    pop rbx
+005d  5d                    pop rbp
+005e  c3                    ret
+
+; 20 instructions, 95 bytes
+```
+
+The listing names the runtime helpers the generated code calls into, and shows
+the bytes behind a bulk write. Both modes respect `--no-opt`, so they also show
+what the unoptimized program looks like.
+
 ## Library usage
 
 Add `librbf` to your depedencies in the `Cargo.toml`.

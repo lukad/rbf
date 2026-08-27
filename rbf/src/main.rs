@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use clap::{ArgAction, Parser, ValueEnum};
 use librbf::{Jit, optimize, parse};
 
+mod disasm;
+
 #[derive(Parser)]
 #[command(version, about)]
 struct Args {
@@ -21,8 +23,9 @@ struct Args {
 
     #[arg(
         short,
+        long,
         value_name = "EMIT",
-        help = "Shows the program instead of running it"
+        help = "Prints the parsed/compiled program"
     )]
     emit: Option<Emit>,
 
@@ -33,6 +36,7 @@ struct Args {
 #[derive(Clone, Debug, ValueEnum)]
 enum Emit {
     Ast,
+    Asm,
 }
 
 fn main() {
@@ -50,6 +54,12 @@ fn main() {
     {
         let jit = Jit::new().set_tape_size(args.tape_size);
         let fun = jit.compile(&program);
+
+        if matches!(args.emit, Some(Emit::Asm)) {
+            print!("{}", disasm::disassemble(&fun));
+            return;
+        }
+
         fun.run();
         std::io::stdout().flush().unwrap();
     }

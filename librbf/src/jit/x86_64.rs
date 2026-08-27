@@ -1,5 +1,5 @@
 use super::Function;
-use super::common::{getchar, memzero, putbytes, putchar};
+use super::common::Helper;
 use super::lower::{self, Emitter};
 use crate::ast::Program;
 use dynasm::dynasm;
@@ -48,9 +48,10 @@ impl Jit {
         );
 
         // Zero tape
+        let memzero = Helper::MemZero.address();
         dynasm!(self.ops
                 ; .arch x64
-                ; mov rax, QWORD memzero as *const () as _
+                ; mov rax, QWORD memzero as _
                 ; mov rdi, rbx
                 ; mov rsi, self.tape_size as _
                 ; call rax
@@ -148,17 +149,19 @@ impl Jit {
             );
         }
 
+        let putchar = Helper::PutChar.address();
         dynasm!(self.ops
             ; .arch x64
-            ; mov rax, QWORD putchar as *const () as _
+            ; mov rax, QWORD putchar as _
             ; call rax
         );
     }
 
     fn read(&mut self, offset: i64) {
+        let getchar = Helper::GetChar.address();
         dynasm!(self.ops
             ; .arch x64
-            ; mov rax, QWORD getchar as *const () as _
+            ; mov rax, QWORD getchar as _
             ; call rax
         );
 
@@ -177,22 +180,24 @@ impl Jit {
     }
 
     fn write_byte(&mut self, byte: u8) {
+        let putchar = Helper::PutChar.address();
         dynasm!(self.ops
             ; .arch x64
             ; mov rdi, byte as _
-            ; mov rax, QWORD putchar as *const () as _
+            ; mov rax, QWORD putchar as _
             ; call rax
         );
     }
 
     fn write_bytes(&mut self, bytes: &[u8]) {
         let (ptr, len) = self.retain_bytes(bytes);
+        let putbytes = Helper::PutBytes.address();
 
         dynasm!(self.ops
             ; .arch x64
             ; mov rdi, QWORD ptr as _
             ; mov rsi, len as _
-            ; mov rax, QWORD putbytes as *const () as _
+            ; mov rax, QWORD putbytes as _
             ; call rax
         );
     }

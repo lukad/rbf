@@ -1,8 +1,7 @@
 use super::Function;
-use super::common::{getchar, memzero, putchar};
+use super::common::Helper;
 use super::lower::{self, Emitter};
 use crate::ast::Program;
-use crate::jit::common::putbytes;
 use dynasm::dynasm;
 use dynasmrt::{DynasmApi, DynasmLabelApi};
 
@@ -78,16 +77,16 @@ impl Jit {
         );
 
         self.load_x(Reg::Arg1, self.tape_size as u64);
-        self.load_x(Reg::HelperTarget, memzero as *const () as u64);
+        self.load_x(Reg::HelperTarget, Helper::MemZero.address() as u64);
         dynasm!(self.ops
                 ; .arch aarch64
                 ; mov X(Reg::Arg0), X(Reg::TapePtr)
                 ; blr X(Reg::HelperTarget)
         );
 
-        self.load_x(Reg::PutCharTarget, putchar as *const () as u64);
-        self.load_x(Reg::PutBytesTarget, putbytes as *const () as u64);
-        self.load_x(Reg::GetCharTarget, getchar as *const () as u64);
+        self.load_x(Reg::PutCharTarget, Helper::PutChar.address() as u64);
+        self.load_x(Reg::PutBytesTarget, Helper::PutBytes.address() as u64);
+        self.load_x(Reg::GetCharTarget, Helper::GetChar.address() as u64);
 
         lower::generate(&mut self, program);
 

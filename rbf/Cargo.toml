@@ -8,3 +8,10 @@ edition = "2024"
 [dependencies]
 librbf = { path = "../librbf", version = "0.1.0" }
 clap = { version = "4", features = ["derive"] }
+yaxpeax-arch = { version = "0.3", default-features = false, features = ["std"] }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+yaxpeax-x86 = { version = "2.2", default-features = false, features = ["std", "fmt"] }
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+yaxpeax-arm = { version = "0.4", default-features = false, features = ["std", "fmt"] }

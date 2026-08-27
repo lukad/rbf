@@ -8,7 +8,7 @@ mod x86_64;
 
 #[cfg(all(target_arch = "aarch64", any(target_os = "linux", target_os = "macos")))]
 pub use aarch64::Jit;
-pub use common::Function;
+pub use common::{Function, Symbol};
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::Jit;
 
